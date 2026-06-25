@@ -50,6 +50,7 @@ function countClaudeMessages(content: string): number {
   return content.split("\n").filter((l) => l.trim()).length;
 }
 
+/** 注意参数顺序：(source, projectPath, sessionId) —— projectPath 在 sessionId 前，与其他解析器不同。 */
 export async function readClaudeSession(
   source: FileSource,
   projectPath: string,

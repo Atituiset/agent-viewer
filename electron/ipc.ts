@@ -28,6 +28,14 @@ export function registerIpc() {
   ipcMain.handle("machines:list", () => ok(loadMachines()));
   ipcMain.handle("machines:add", (_e, cfg) => {
     try {
+      if (
+        !cfg ||
+        typeof cfg.host !== "string" ||
+        typeof cfg.user !== "string" ||
+        typeof cfg.port !== "number"
+      ) {
+        return err(new Error("invalid machine config"));
+      }
       return ok(addMachine(cfg));
     } catch (e) {
       return err(e);
@@ -97,7 +105,8 @@ async function readByTool(
 ): Promise<ConversationMessage[]> {
   switch (toolId) {
     case "claude-code":
-      return readClaudeSession(src, projectPath || "", sessionId);
+      if (!projectPath) throw new Error("claude-code session requires projectPath");
+      return readClaudeSession(src, projectPath, sessionId);
     case "codex":
       return readCodexSession(src, sessionId);
     case "opencode":

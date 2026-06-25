@@ -20,7 +20,7 @@ function createWindow() {
     win.loadURL("http://localhost:3000");
     win.webContents.openDevTools();
   } else {
-    win.loadFile(path.join(__dirname, "../../out/index.html"));
+    win.loadFile(path.join(app.getAppPath(), "out", "index.html"));
   }
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -40,6 +40,9 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", async () => {
-  await disposeAll();
+app.on("before-quit", (e) => {
+  e.preventDefault();
+  disposeAll()
+    .catch(() => {})
+    .finally(() => app.exit(0));
 });

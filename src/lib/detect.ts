@@ -50,5 +50,3 @@ async function countSessions(source: FileSource, toolId: string): Promise<number
     default: return 0;
   }
 }
-
-export function getMachineName(): string { return ""; }

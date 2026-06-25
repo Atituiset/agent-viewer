@@ -4,7 +4,8 @@ import type { MachineConfig, DetectedTool, ToolSession, ConversationMessage } fr
 const api = {
   machines: {
     list: (): Promise<{ data?: MachineConfig[]; error?: string }> => ipcRenderer.invoke("machines:list"),
-    add: (cfg: Omit<MachineConfig, "id" | "status">) => ipcRenderer.invoke("machines:add", cfg),
+    add: (cfg: Omit<MachineConfig, "id" | "status">): Promise<{ data?: MachineConfig; error?: string }> =>
+      ipcRenderer.invoke("machines:add", cfg),
     remove: (id: string) => ipcRenderer.invoke("machines:remove", id),
   },
   tools: {
