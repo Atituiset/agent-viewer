@@ -1,61 +1,50 @@
-import fs from "fs";
-import path from "path";
-import os from "os";
-import type { CodexSession, ConversationMessage, ToolSession } from "./types";
+import type { FileSource } from "../../electron/fs-source/types";
+import { join } from "../../electron/fs-source/util";
+import type { ConversationMessage, ToolSession } from "./types";
 
-function getCodexRoot(): string {
-  return path.join(os.homedir(), ".codex", "sessions");
+const ROOT = ".codex/sessions";
+
+async function walk(source: FileSource, dir: string, acc: { rel: string; name: string }[]) {
+  for (const entry of await source.readDir(dir)) {
+    const rel = join(dir, entry.name);
+    if (entry.isDirectory) await walk(source, rel, acc);
+    else if (entry.name.endsWith(".jsonl")) acc.push({ rel, name: entry.name });
+  }
 }
 
-export function listCodexSessions(): ToolSession[] {
-  const root = getCodexRoot();
-  if (!fs.existsSync(root)) return [];
+export async function listCodexSessions(source: FileSource): Promise<ToolSession[]> {
+  if (!(await source.exists(ROOT))) return [];
+  const files: { rel: string; name: string }[] = [];
+  await walk(source, ROOT, files);
 
   const sessions: ToolSession[] = [];
-  function walk(dir: string) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(fullPath);
-      } else if (entry.name.endsWith(".jsonl")) {
-        try {
-          const content = fs.readFileSync(fullPath, "utf-8");
-          const lines = content.split("\n").filter((l) => l.trim());
-          const title = entry.name.replace(/^rollout-/, "").replace(/\.jsonl$/, "").replace(/-/g, " ");
-          sessions.push({
-            id: entry.name.replace(".jsonl", ""),
-            title: title.slice(0, 80),
-            createdAt: fs.statSync(fullPath).birthtime.toISOString(),
-            messageCount: lines.length,
-          });
-        } catch {}
-      }
-    }
+  for (const f of files) {
+    try {
+      const content = await source.readFile(f.rel);
+      const messageCount = content.split("\n").filter((l) => l.trim()).length;
+      const stat = await source.stat(f.rel);
+      sessions.push({
+        id: f.name.replace(".jsonl", ""),
+        title: f.name.replace(/^rollout-/, "").replace(/\.jsonl$/, "").replace(/-/g, " ").slice(0, 80),
+        createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
+        messageCount,
+      });
+    } catch {}
   }
-  walk(root);
   return sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export function readCodexSession(sessionId: string): ConversationMessage[] {
-  const root = getCodexRoot();
-  if (!fs.existsSync(root)) return [];
-
-  let filePath = "";
-  function find(dir: string) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fp = path.join(dir, entry.name);
-      if (entry.isDirectory()) find(fp);
-      else if (entry.name === `${sessionId}.jsonl` || (sessionId && entry.name.endsWith(".jsonl") && entry.name.includes(sessionId))) {
-        filePath = fp;
-      }
-    }
-  }
-  find(root);
-  if (!filePath) return [];
+export async function readCodexSession(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
+  if (!(await source.exists(ROOT))) return [];
+  const files: { rel: string; name: string }[] = [];
+  await walk(source, ROOT, files);
+  const hit = files.find(
+    (f) => f.name === `${sessionId}.jsonl` || (sessionId && f.name.endsWith(".jsonl") && f.name.includes(sessionId))
+  );
+  if (!hit) return [];
 
   const messages: ConversationMessage[] = [];
-  const lines = fs.readFileSync(filePath, "utf-8").split("\n");
-
+  const lines = (await source.readFile(hit.rel)).split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     try {
@@ -63,28 +52,14 @@ export function readCodexSession(sessionId: string): ConversationMessage[] {
       const payload = obj.payload || obj;
       const type = obj.type || payload.type || "";
       const role = payload.role || type;
-
-      if (role === "user" || type === "input" || type === "message" && payload.role === "user") {
-        const text = payload.content || payload.text || payload.message || "";
-        messages.push({
-          id: `cx-${i}`,
-          role: "user",
-          content: typeof text === "string" ? text : JSON.stringify(text),
-          timestamp: obj.timestamp ? new Date(obj.timestamp as string).toISOString() : new Date().toISOString(),
-          source: "codex",
-        });
+      const text = payload.content || payload.text || payload.message || "";
+      const ts = obj.timestamp ? new Date(obj.timestamp as string).toISOString() : new Date().toISOString();
+      if (role === "user" || type === "input" || (type === "message" && payload.role === "user")) {
+        messages.push({ id: `cx-${i}`, role: "user", content: typeof text === "string" ? text : JSON.stringify(text), timestamp: ts, source: "codex" });
       } else if (role === "assistant" || type === "output" || (type === "message" && payload.role === "assistant")) {
-        const text = payload.content || payload.text || payload.message || "";
-        messages.push({
-          id: `cx-${i}`,
-          role: "assistant",
-          content: typeof text === "string" ? text : JSON.stringify(text),
-          timestamp: obj.timestamp ? new Date(obj.timestamp as string).toISOString() : new Date().toISOString(),
-          source: "codex",
-        });
+        messages.push({ id: `cx-${i}`, role: "assistant", content: typeof text === "string" ? text : JSON.stringify(text), timestamp: ts, source: "codex" });
       }
     } catch {}
   }
-
   return messages;
 }
