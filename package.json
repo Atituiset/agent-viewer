@@ -2,6 +2,8 @@
   "name": "agent-viewer",
   "version": "0.1.0",
   "private": true,
+  "description": "Local & remote agent session viewer (Claude Code / Codex / OpenCode / Gemini / DeepSeek / Hermes)",
+  "author": "agent-viewer <agent-viewer@example.com>",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "next dev",
@@ -45,7 +47,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
-    "electron": "^36.9.5",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -65,6 +66,7 @@
     "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "electron": "^36.9.5",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.9"
