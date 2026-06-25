@@ -1,6 +1,6 @@
 import { Client } from "ssh2";
 import type { FileSource, DirEntry, FileStat } from "./types";
-import { resolvePath, join } from "./util";
+import { resolvePath } from "./util";
 
 export interface SshOptions {
   host: string;
@@ -10,11 +10,20 @@ export interface SshOptions {
   privateKey?: string;
 }
 
+/**
+ * SSH FileSource 走 `exec`（远程 shell 命令），而非 SFTP 子系统。
+ * SFTP 子系统在很多 sshd 上是可选/被关掉的（缺它会让检测静默失败）；
+ * exec 是 SSH 核心功能，几乎一定可用，更稳。
+ * 假设远程是 GNU coreutils 环境（stat -c / find -printf / base64 -w0），
+ * 本查看器的目标机器（Linux）都满足。
+ *
+ * 数据流：只把「命令输出」传回本地——目录列举、文件内容按需读取进内存；
+ * 不把会话文件落盘。OpenCode 的 sqlite 是唯一例外（见 readFileBuffer）。
+ */
 export class SshFileSource implements FileSource {
   readonly kind = "ssh" as const;
   readonly home = "";
   private client = new Client();
-  private sftp: SftpHandle | null = null;
   private ready: Promise<void>;
   private initPromise: Promise<void> | null = null;
   private disposed = false;
@@ -35,145 +44,108 @@ export class SshFileSource implements FileSource {
     });
   }
 
-  /** 建立连接、解析远程 $HOME、缓存 sftp。并发调用共享同一次初始化。 */
+  /** 建立连接并解析远程 $HOME。并发调用共享同一次初始化。 */
   init(): Promise<void> {
     if (this.initPromise) return this.initPromise;
     this.initPromise = (async () => {
       await this.ready;
-      this.sftp = await new Promise<SftpHandle>((res, rej) =>
-        this.client.sftp((e, s) => (e ? rej(e) : res(s as SftpHandle)))
-      );
-      const home = await this.execHome();
+      const home = await this.exec('printf %s "$HOME"');
+      if (!home) {
+        throw new Error(`Could not determine $HOME on ${this.opts.host} (shell exec disabled?)`);
+      }
       (this as { home: string }).home = home;
     })();
     return this.initPromise;
   }
 
-  private execHome(): Promise<string> {
+  /** 单引号转义路径，安全地拼进 shell 命令。 */
+  private sh(p: string): string {
+    return "'" + String(p).replace(/'/g, "'\\''") + "'";
+  }
+
+  private abs(p: string): string {
+    return resolvePath(this, p);
+  }
+
+  /** 运行一条远程命令，返回 stdout；非 0 退出码则 reject。 */
+  private exec(cmd: string): Promise<string> {
+    if (this.disposed) return Promise.reject(new Error("SshFileSource disposed"));
     return new Promise((res, rej) => {
       let out = "";
-      this.client.exec("echo $HOME", (e, stream) => {
+      let err = "";
+      this.client.exec(cmd, (e, stream) => {
         if (e) return rej(e);
         stream.on("data", (d: Buffer) => (out += d.toString()));
-        stream.on("close", () => {
-          const h = out.trim();
-          if (!h)
-            return rej(
-              new Error(`Could not determine $HOME on ${this.opts.host} (shell exec disabled?)`)
+        stream.stderr.on("data", (d: Buffer) => (err += d.toString()));
+        stream.on("close", (code: number | null) => {
+          if (code === 0) res(out);
+          else
+            rej(
+              new Error(
+                `remote command failed (exit ${code}): ${cmd.slice(0, 80)}${
+                  err ? " :: " + err.trim().slice(0, 200) : ""
+                }`
+              )
             );
-          res(h);
         });
-        stream.stderr.on("data", () => {});
       });
     });
-  }
-
-  private async getSftp(): Promise<SftpHandle> {
-    if (this.disposed) throw new Error("SshFileSource disposed");
-    if (!this.sftp) await this.init();
-    return this.sftp!;
-  }
-
-  private statIsDir(sftp: SftpHandle, absPath: string): Promise<boolean> {
-    return new Promise((res) =>
-      sftp.stat(absPath, (e, st) => res(!e && !!st && (st.mode! & 0o170000) === 0o040000))
-    );
   }
 
   async exists(p: string): Promise<boolean> {
-    const sftp = await this.getSftp();
-    return new Promise((res) => sftp.stat(resolvePath(this, p), (e) => res(!e)));
+    try {
+      await this.exec(`test -e ${this.sh(this.abs(p))}`);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async readDir(p: string): Promise<DirEntry[]> {
-    const sftp = await this.getSftp();
-    const absDir = resolvePath(this, p);
-    return new Promise((res, rej) => {
-      sftp.readdir(absDir, async (e, list) => {
-        if (e || !list) return rej(e ?? new Error("readdir returned no list"));
-        const out: DirEntry[] = [];
-        for (const item of list) {
-          const mode = item.attrs.mode || 0;
-          let isDir = (mode & 0o170000) === 0o040000;
-          // 很多 OpenSSH 服务端在 readdir 的 attrs 里不带 mode 位，回退到逐项 stat。
-          if (!mode) isDir = await this.statIsDir(sftp, join(absDir, item.filename));
-          out.push({ name: item.filename, isDirectory: isDir });
-        }
-        res(out);
-      });
-    });
+    // GNU find：%y=类型(f/d/l...)，%f=basename。-mindepth 1 跳过目录自身。
+    let out: string;
+    try {
+      out = await this.exec(`find ${this.sh(this.abs(p))} -mindepth 1 -maxdepth 1 -printf '%y\t%f\\n'`);
+    } catch {
+      return []; // 目录不存在或不可读
+    }
+    const entries: DirEntry[] = [];
+    for (const line of out.split("\n")) {
+      if (!line) continue;
+      const tab = line.indexOf("\t");
+      if (tab < 0) continue;
+      const type = line.slice(0, tab);
+      const name = line.slice(tab + 1);
+      if (!name) continue;
+      entries.push({ name, isDirectory: type === "d" });
+    }
+    return entries;
   }
 
   async readFile(p: string): Promise<string> {
-    const sftp = await this.getSftp();
-    return new Promise((res, rej) => {
-      let buf = "";
-      const stream = sftp.createReadStream(resolvePath(this, p), { encoding: "utf-8" as BufferEncoding });
-      stream.on("data", (d: string) => (buf += d));
-      stream.on("end", () => res(buf));
-      stream.on("error", (e) => {
-        stream.destroy();
-        rej(e);
-      });
-    });
+    return this.exec(`cat ${this.sh(this.abs(p))}`);
   }
 
   async readFileBuffer(p: string): Promise<Buffer> {
-    const sftp = await this.getSftp();
-    return new Promise((res, rej) => {
-      const chunks: Buffer[] = [];
-      const stream = sftp.createReadStream(resolvePath(this, p));
-      stream.on("data", (d: Buffer) => chunks.push(d));
-      stream.on("end", () => res(Buffer.concat(chunks)));
-      stream.on("error", (e) => {
-        stream.destroy();
-        rej(e);
-      });
-    });
+    // OpenCode sqlite：base64 -w0 无换行整段输出，本地解码后写临时文件用 better-sqlite3 打开。
+    // 这是唯一会落本地（临时）的数据；openDbFromBuffer 用完即删。
+    const b64 = await this.exec(`base64 -w0 ${this.sh(this.abs(p))}`);
+    return Buffer.from(b64.trim(), "base64");
   }
 
   async stat(p: string): Promise<FileStat> {
-    const sftp = await this.getSftp();
-    return new Promise((res, rej) => {
-      sftp.stat(resolvePath(this, p), (e, st) => {
-        if (e || !st) return rej(e ?? new Error("stat returned no stats"));
-        res({ mtime: new Date((st.mtime ?? 0) * 1000) }); // SFTP 无 birthtime
-      });
-    });
+    // %W=birth(epoch,未知为0)，%Y=mtime(epoch)
+    const out = await this.exec(`stat -c '%W %Y' ${this.sh(this.abs(p))}`);
+    const parts = out.trim().split(/\s+/).map((n) => Number(n));
+    const mtime = new Date((parts[1] ?? 0) * 1000);
+    const birthtime = parts[0] && parts[0] > 0 ? new Date(parts[0] * 1000) : undefined;
+    return { mtime, birthtime };
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
     try {
-      this.sftp?.end?.();
-    } catch {}
-    try {
       this.client.end();
     } catch {}
   }
-}
-
-// ssh2 的 SFTP 类型较繁琐，这里用最小结构类型。
-interface SftpStats {
-  mode?: number;
-  mtime?: number;
-}
-interface SftpListItem {
-  filename: string;
-  attrs: SftpStats;
-}
-interface SftpHandle {
-  stat(path: string, cb: (err: Error | null, stats?: SftpStats) => void): void;
-  readdir(path: string, cb: (err: Error | null, list?: SftpListItem[]) => void): void;
-  createReadStream(path: string, opts?: { encoding?: BufferEncoding }): SftpReadStream;
-  end?(...args: unknown[]): unknown;
-}
-
-interface SftpReadStream {
-  on(event: "data", listener: (chunk: string) => void): this;
-  on(event: "data", listener: (chunk: Buffer) => void): this;
-  on(event: "end", listener: () => void): this;
-  on(event: "error", listener: (err: Error) => void): this;
-  on(event: "close", listener: () => void): this;
-  destroy(): void;
 }
