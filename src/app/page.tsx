@@ -15,6 +15,7 @@ export default function Home() {
   const [machines, setMachines] = useState<MachineConfig[]>([]);
   const [selectedMachine, setSelectedMachine] = useState<MachineConfig | null>(null);
   const [tools, setTools] = useState<DetectedTool[]>([]);
+  const [toolsError, setToolsError] = useState<string | null>(null);
   const [selectedTool, setSelectedTool] = useState<DetectedTool | null>(null);
   const [sessions, setSessions] = useState<ToolSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ToolSession | null>(null);
@@ -31,11 +32,21 @@ export default function Home() {
   const loadTools = useCallback(async (machine: MachineConfig) => {
     setSelectedMachine(machine);
     setLoading(true);
+    setToolsError(null);
     try {
       const r = await window.api.tools.detect(machine.id);
-      setTools(r.data || []);
+      if (r.error) {
+        setToolsError(r.error);
+        setTools([]);
+      } else {
+        setTools(r.data || []);
+      }
       setView("tools");
-    } catch {}
+    } catch (e) {
+      setToolsError(String(e));
+      setTools([]);
+      setView("tools");
+    }
     setLoading(false);
   }, []);
 
@@ -170,7 +181,7 @@ export default function Home() {
         ) : view === "machines" ? (
           <MachineCards machines={machines} onSelect={loadTools} onRemove={handleRemoveMachine} />
         ) : view === "tools" ? (
-          <ToolCards tools={tools} machine={selectedMachine!} onSelect={loadSessions} />
+          <ToolCards tools={tools} machine={selectedMachine!} onSelect={loadSessions} error={toolsError} />
         ) : view === "sessions" ? (
           <SessionList sessions={sessions} tool={selectedTool!} onSelect={loadSession} />
         ) : (

@@ -6,16 +6,33 @@ interface Props {
   tools: DetectedTool[];
   machine: MachineConfig;
   onSelect: (tool: DetectedTool) => void;
+  error?: string | null;
 }
 
-export default function ToolCards({ tools, machine, onSelect }: Props) {
+export default function ToolCards({ tools, machine, onSelect, error }: Props) {
   if (tools.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-zinc-600">
-        <div className="text-center">
-          <div className="text-5xl mb-4">🔍</div>
-          <h2 className="text-lg font-medium text-zinc-400">No Agent Tools Found</h2>
-          <p className="text-sm mt-2">No supported agent tools detected on this machine.</p>
+      <div className="flex items-center justify-center h-full text-zinc-600 p-6">
+        <div className="text-center max-w-lg w-full">
+          <div className="text-5xl mb-4">{error ? "⚠️" : "🔍"}</div>
+          <h2 className="text-lg font-medium text-zinc-400">
+            {error ? "读取失败 / Connection Failed" : "No Agent Tools Found"}
+          </h2>
+          <p className="text-sm mt-2">
+            {error
+              ? `无法从 ${machine.name} 读取工具列表。`
+              : "No supported agent tools detected on this machine."}
+          </p>
+          {error && (
+            <pre className="mt-4 text-left text-xs text-red-300 bg-red-950/40 border border-red-900/50 rounded-md p-3 overflow-x-auto whitespace-pre-wrap break-all">
+              {error}
+            </pre>
+          )}
+          {error && (
+            <p className="text-xs text-zinc-500 mt-3">
+              若是 SSH 远程：检查目标机器 sshd 是否在跑（<code className="text-zinc-400">sudo service ssh start</code>）、账号密码/密钥是否正确、网络/防火墙是否可达。
+            </p>
+          )}
         </div>
       </div>
     );
