@@ -94,7 +94,7 @@ export default function Home() {
 
   const handleAddMachine = useCallback(async (m: { name: string; host: string; user: string; port: number; authMethod: "sshKey" | "password"; sshKey?: string; password?: string }) => {
     try {
-      const r = await window.api.machines.add(m);
+      const r = await window.api.machines.add({ ...m, type: "ssh" });
       if (r.data) setMachines((prev) => [...prev, r.data!]);
     } catch {}
     setShowAddMachine(false);
