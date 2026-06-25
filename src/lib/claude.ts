@@ -1,37 +1,30 @@
-import fs from "fs";
-import path from "path";
-import os from "os";
+import type { FileSource } from "../../electron/fs-source/types";
+import { join } from "../../electron/fs-source/util";
 import type { ClaudeMessage, ContentBlock, ConversationMessage, ToolCall, ToolSession } from "./types";
 
-function getClaudeRoot(): string {
-  return path.join(os.homedir(), ".claude", "projects");
-}
+const ROOT = ".claude/projects";
 
-export function listClaudeSessionsAll(): ToolSession[] {
-  const root = getClaudeRoot();
-  if (!fs.existsSync(root)) return [];
-
+export async function listClaudeSessionsAll(source: FileSource): Promise<ToolSession[]> {
+  if (!(await source.exists(ROOT))) return [];
   const result: ToolSession[] = [];
-  const entries = fs.readdirSync(root, { withFileTypes: true });
+  const entries = await source.readDir(ROOT);
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const dir = path.join(root, entry.name);
+    if (!entry.isDirectory) continue;
+    const dirRel = join(ROOT, entry.name);
     const projectName = entry.name.replace(/^-/, "").replace(/-/g, "/").replace(/^home\/[^/]+\//, "~/");
 
-    const jsonlFiles = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
-    for (const f of jsonlFiles) {
-      const filePath = path.join(dir, f);
+    for (const f of await source.readDir(dirRel)) {
+      if (!f.name.endsWith(".jsonl")) continue;
+      const fileRel = join(dirRel, f.name);
       try {
-        const stat = fs.statSync(filePath);
-        const id = f.replace(".jsonl", "");
-        const title = extractClaudeTitle(filePath);
-        const msgCount = countClaudeMessages(filePath);
+        const stat = await source.stat(fileRel);
+        const content = await source.readFile(fileRel);
         result.push({
-          id,
-          title,
-          createdAt: stat.birthtime.toISOString(),
-          messageCount: msgCount,
+          id: f.name.replace(".jsonl", ""),
+          title: extractClaudeTitle(content),
+          createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
+          messageCount: countClaudeMessages(content),
           project: projectName,
           projectPath: entry.name,
         });
@@ -42,10 +35,9 @@ export function listClaudeSessionsAll(): ToolSession[] {
   return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-function extractClaudeTitle(filePath: string): string {
+function extractClaudeTitle(content: string): string {
   try {
-    const lines = fs.readFileSync(filePath, "utf-8").split("\n");
-    for (const line of lines) {
+    for (const line of content.split("\n")) {
       if (!line.trim()) continue;
       const obj: ClaudeMessage = JSON.parse(line);
       if (obj.type === "ai-title") return (obj.aiTitle as string) || "Untitled";
@@ -54,21 +46,20 @@ function extractClaudeTitle(filePath: string): string {
   return "Untitled";
 }
 
-function countClaudeMessages(filePath: string): number {
-  try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return content.split("\n").filter((l) => l.trim()).length;
-  } catch {
-    return 0;
-  }
+function countClaudeMessages(content: string): number {
+  return content.split("\n").filter((l) => l.trim()).length;
 }
 
-export function readClaudeSession(projectPath: string, sessionId: string): ConversationMessage[] {
-  const filePath = path.join(getClaudeRoot(), projectPath, `${sessionId}.jsonl`);
-  if (!fs.existsSync(filePath)) return [];
+export async function readClaudeSession(
+  source: FileSource,
+  projectPath: string,
+  sessionId: string
+): Promise<ConversationMessage[]> {
+  const fileRel = join(ROOT, projectPath, `${sessionId}.jsonl`);
+  if (!(await source.exists(fileRel))) return [];
 
   const messages: ConversationMessage[] = [];
-  const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+  const lines = (await source.readFile(fileRel)).split("\n");
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -76,11 +67,10 @@ export function readClaudeSession(projectPath: string, sessionId: string): Conve
       const obj: ClaudeMessage = JSON.parse(line);
       if (obj.type === "user" && obj.message) {
         const msg = obj.message as { role?: string; content?: string | ContentBlock[] };
-        const text = extractTextFromContent(msg.content);
         messages.push({
           id: obj.uuid || `user-${messages.length}`,
           role: "user",
-          content: text,
+          content: extractTextFromContent(msg.content),
           timestamp: obj.timestamp || new Date().toISOString(),
           source: "claude",
         });
@@ -106,10 +96,7 @@ export function readClaudeSession(projectPath: string, sessionId: string): Conve
 function extractTextFromContent(content: string | ContentBlock[] | undefined): string {
   if (!content) return "";
   if (typeof content === "string") return content;
-  return content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text || "")
-    .join("\n");
+  return content.filter((b) => b.type === "text").map((b) => b.text || "").join("\n");
 }
 
 function extractAssistantContent(
@@ -117,23 +104,14 @@ function extractAssistantContent(
 ): { text: string; thinking?: string; toolCalls?: ToolCall[] } {
   if (!content) return { text: "" };
   if (typeof content === "string") return { text: content };
-
   let text = "";
   let thinking: string | undefined;
   const toolCalls: ToolCall[] = [];
-
   for (const block of content) {
-    if (block.type === "text" && block.text) {
-      text += block.text + "\n";
-    } else if (block.type === "thinking" && block.thinking) {
-      thinking = (thinking || "") + block.thinking + "\n";
-    } else if (block.type === "tool_use") {
-      toolCalls.push({
-        name: block.name || "unknown",
-        input: (block.input as Record<string, unknown>) || {},
-      });
-    }
+    if (block.type === "text" && block.text) text += block.text + "\n";
+    else if (block.type === "thinking" && block.thinking) thinking = (thinking || "") + block.thinking + "\n";
+    else if (block.type === "tool_use")
+      toolCalls.push({ name: block.name || "unknown", input: (block.input as Record<string, unknown>) || {} });
   }
-
   return { text: text.trimEnd(), thinking: thinking?.trimEnd(), toolCalls: toolCalls.length > 0 ? toolCalls : undefined };
 }
