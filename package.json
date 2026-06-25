@@ -2,27 +2,67 @@
   "name": "agent-viewer",
   "version": "0.1.0",
   "private": true,
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "electron:dev": "AGENT_VIEWER_DEV=1 npm run build:electron && electron .",
+    "dist": "npm run build && npm run build:electron && electron-builder"
+  },
+  "build": {
+    "appId": "com.agentviewer.app",
+    "productName": "Agent Viewer",
+    "files": [
+      "out/**/*",
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "asarUnpack": [
+      "**/better-sqlite3/**",
+      "**/*.node"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
+    "electron": "^36.9.5",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
     "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ssh2": "^1.15.5",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
