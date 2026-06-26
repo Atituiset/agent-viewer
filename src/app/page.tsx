@@ -15,6 +15,7 @@ export default function Home() {
   const [machines, setMachines] = useState<MachineConfig[]>([]);
   const [selectedMachine, setSelectedMachine] = useState<MachineConfig | null>(null);
   const [tools, setTools] = useState<DetectedTool[]>([]);
+  const [toolsError, setToolsError] = useState<string | null>(null);
   const [selectedTool, setSelectedTool] = useState<DetectedTool | null>(null);
   const [sessions, setSessions] = useState<ToolSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ToolSession | null>(null);
@@ -25,68 +26,74 @@ export default function Home() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    fetch("/api/machines")
-      .then((r) => r.json())
-      .then((data) => { if (data.machines) setMachines(data.machines); })
-      .catch(() => {});
+    window.api.machines.list().then((r) => { if (r.data) setMachines(r.data); }).catch(() => {});
   }, []);
 
   const loadTools = useCallback(async (machine: MachineConfig) => {
     setSelectedMachine(machine);
     setLoading(true);
+    setToolsError(null);
     try {
-      const res = await fetch("/api/tools?machineId=" + machine.id);
-      const data = await res.json();
-      setTools(data.tools || []);
+      const r = await window.api.tools.detect(machine.id);
+      if (r.error) {
+        setToolsError(r.error);
+        setTools([]);
+      } else {
+        setTools(r.data || []);
+      }
       setView("tools");
-    } catch {}
+    } catch (e) {
+      setToolsError(String(e));
+      setTools([]);
+      setView("tools");
+    }
     setLoading(false);
   }, []);
 
   const loadSessions = useCallback(async (tool: DetectedTool) => {
+    if (!selectedMachine) return;
     setSelectedTool(tool);
     setLoading(true);
     try {
-      const res = await fetch(`/api/${tool.id}/sessions`);
-      const data = await res.json();
-      setSessions(data.sessions || []);
+      const r = await window.api.sessions.list(selectedMachine.id, tool.id);
+      setSessions(r.data || []);
       setView("sessions");
     } catch {}
     setLoading(false);
-  }, []);
+  }, [selectedMachine]);
 
   const loadSession = useCallback(async (session: ToolSession) => {
-    if (!selectedTool) return;
+    if (!selectedTool || !selectedMachine) return;
     setSelectedSession(session);
     setLoading(true);
     setMessages([]);
     try {
-      const toolId = selectedTool.id;
-      let url = `/api/${toolId}/session?id=${session.id}`;
-      if (toolId === "claude-code" && session.projectPath) {
-        url += `&projectPath=${encodeURIComponent(session.projectPath)}`;
-      }
-      const data = await fetch(url).then((r) => r.json());
-      setMessages(data.messages || []);
+      const r = await window.api.sessions.read(
+        selectedMachine.id,
+        selectedTool.id,
+        session.id,
+        selectedTool.id === "claude-code" ? session.projectPath : undefined
+      );
+      setMessages(r.data || []);
       setView("conversation");
     } catch (e) {
       console.error("Failed to load session:", e);
     }
     setLoading(false);
-  }, [selectedTool]);
+  }, [selectedTool, selectedMachine]);
 
   const refreshSession = useCallback(async () => {
-    if (!selectedSession || !selectedTool) return;
+    if (!selectedSession || !selectedTool || !selectedMachine) return;
     try {
-      const toolId = selectedTool.id;
-      let url = `/api/${toolId}/session?id=${selectedSession.id}`;
-      if (toolId === "claude-code" && selectedSession.projectPath) {
-        url += `&projectPath=${encodeURIComponent(selectedSession.projectPath)}`;
-      }
-      const data = await fetch(url).then((r) => r.json());
-      setMessages(data.messages || []);
+      const r = await window.api.sessions.read(
+        selectedMachine.id,
+        selectedTool.id,
+        selectedSession.id,
+        selectedTool.id === "claude-code" ? selectedSession.projectPath : undefined
+      );
+      setMessages(r.data || []);
     } catch {}
-  }, [selectedSession, selectedTool]);
+  }, [selectedSession, selectedTool, selectedMachine]);
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -98,26 +105,15 @@ export default function Home() {
 
   const handleAddMachine = useCallback(async (m: { name: string; host: string; user: string; port: number; authMethod: "sshKey" | "password"; sshKey?: string; password?: string }) => {
     try {
-      const res = await fetch("/api/machines/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(m),
-      });
-      const data = await res.json();
-      if (data.machine) {
-        setMachines((prev) => [...prev, data.machine]);
-      }
+      const r = await window.api.machines.add({ ...m, type: "ssh" });
+      if (r.data) setMachines((prev) => [...prev, r.data!]);
     } catch {}
     setShowAddMachine(false);
   }, []);
 
   const handleRemoveMachine = useCallback(async (id: string) => {
     try {
-      await fetch("/api/machines/remove", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
+      await window.api.machines.remove(id);
       setMachines((prev) => prev.filter((m) => m.id !== id));
     } catch {}
   }, []);
@@ -185,7 +181,7 @@ export default function Home() {
         ) : view === "machines" ? (
           <MachineCards machines={machines} onSelect={loadTools} onRemove={handleRemoveMachine} />
         ) : view === "tools" ? (
-          <ToolCards tools={tools} machine={selectedMachine!} onSelect={loadSessions} />
+          <ToolCards tools={tools} machine={selectedMachine!} onSelect={loadSessions} error={toolsError} />
         ) : view === "sessions" ? (
           <SessionList sessions={sessions} tool={selectedTool!} onSelect={loadSession} />
         ) : (

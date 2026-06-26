@@ -35,7 +35,8 @@ export function saveMachines(machines: MachineConfig[]) {
 export function addMachine(machine: Omit<MachineConfig, "id" | "status">): MachineConfig {
 
   const machines = loadMachines();
-  const id = `ssh-${machine.host}-${machine.port}`;
+  let id = `ssh-${machine.host}-${machine.port}`;
+  while (machines.some((m) => m.id === id)) id += `-${Math.random().toString(36).slice(2, 6)}`;
   const newMachine: MachineConfig = {
     ...machine,
     id,
