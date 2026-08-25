@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "feat/**", "dev"]
+  pull_request:
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # better-sqlite3 需要与 Electron ABI 匹配的原生构建；
+      # 这里验证 rebuild 在三个平台都能通过（CI 不跑 Electron 本体）。
+      - name: Rebuild native modules (Electron ABI)
+        run: npm run rebuild
+        env:
+          # 跳过下载 Electron 二进制，只做头文件编译，快很多
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Typecheck & build Electron main
+        run: npm run build:electron
+
+      - name: Build Next.js renderer
+        run: npm run build

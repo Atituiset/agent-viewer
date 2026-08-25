@@ -10,6 +10,9 @@ export interface SshOptions {
   privateKey?: string;
 }
 
+const EXEC_TIMEOUT_MS = 30_000;
+const CONNECT_TIMEOUT_MS = 15_000;
+
 /**
  * SSH FileSource 走 `exec`（远程 shell 命令），而非 SFTP 子系统。
  * SFTP 子系统在很多 sshd 上是可选/被关掉的（缺它会让检测静默失败）；
@@ -19,42 +22,90 @@ export interface SshOptions {
  *
  * 数据流：只把「命令输出」传回本地——目录列举、文件内容按需读取进内存；
  * 不把会话文件落盘。OpenCode 的 sqlite 是唯一例外（见 readFileBuffer）。
+ *
+ * 稳定性：
+ * - keepalive 防止 NAT/防火墙掐掉空闲连接（Windows 客户端场景常见）。
+ * - 每条 exec 有超时，stream 挂死不再永久 pending。
+ * - 连接断开（error/close）后自动重建客户端，下一次调用透明恢复。
  */
 export class SshFileSource implements FileSource {
   readonly kind = "ssh" as const;
   readonly home = "";
-  private client = new Client();
-  private ready: Promise<void>;
-  private initPromise: Promise<void> | null = null;
+  private client!: Client;
+  private clientReady = false;
   private disposed = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor(private opts: SshOptions) {
-    this.ready = new Promise((resolve, reject) => {
-      this.client
-        .on("ready", () => resolve())
-        .on("error", reject)
-        .connect({
-          host: opts.host,
-          port: opts.port,
-          username: opts.username,
-          password: opts.password,
-          privateKey: opts.privateKey ? Buffer.from(opts.privateKey) : undefined,
-          readyTimeout: 15000,
-        });
+    this.client = this.buildClient();
+  }
+
+  private buildClient(): Client {
+    const client = new Client();
+    client
+      .on("ready", () => {
+        this.clientReady = true;
+      })
+      .on("error", () => {
+        // 连接级错误（含 keepalive 超时）：标记失效，
+        // 下一次 exec 时惰性重建。不在这里 reject 用户调用——
+        // 由当次调用的超时/错误处理负责。
+        this.clientReady = false;
+      })
+      .on("close", () => {
+        // 远端或网络关闭连接后标记失效，触发惰性重连。
+        this.clientReady = false;
+      });
+    client.connect({
+      host: this.opts.host,
+      port: this.opts.port,
+      username: this.opts.username,
+      password: this.opts.password,
+      privateKey: this.opts.privateKey ? Buffer.from(this.opts.privateKey) : undefined,
+      readyTimeout: CONNECT_TIMEOUT_MS,
+      keepaliveInterval: 10_000,
+      keepaliveCountMax: 3,
     });
+    return client;
+  }
+
+  private waitForReady(client: Client): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const onReady = () => { cleanup(); resolve(); };
+      const onError = (e: Error) => { cleanup(); reject(e); };
+      const cleanup = () => {
+        client.off("ready", onReady);
+        client.off("error", onError);
+      };
+      client.on("ready", onReady);
+      client.on("error", onError);
+    });
+  }
+
+  /** 确保有一个 ready 的客户端；必要时重建并等待握手完成。 */
+  private async ensureConnected(): Promise<Client> {
+    if (this.disposed) throw new Error("SshFileSource disposed");
+    if (this.clientReady) return this.client;
+    try {
+      this.client.end();
+    } catch {}
+    this.client = this.buildClient();
+    await this.waitForReady(this.client);
+    this.initPromise = null; // 新连接需要重新解析 $HOME
+    return this.client;
   }
 
   /** 建立连接并解析远程 $HOME。并发调用共享同一次初始化。 */
   init(): Promise<void> {
-    if (this.initPromise) return this.initPromise;
-    this.initPromise = (async () => {
-      await this.ready;
-      const home = await this.exec('printf %s "$HOME"');
-      if (!home) {
-        throw new Error(`Could not determine $HOME on ${this.opts.host} (shell exec disabled?)`);
-      }
-      (this as { home: string }).home = home;
-    })();
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        const home = await this.exec('printf %s "$HOME"');
+        if (!home) {
+          throw new Error(`Could not determine $HOME on ${this.opts.host} (shell exec disabled?)`);
+        }
+        (this as { home: string }).home = home;
+      })();
+    }
     return this.initPromise;
   }
 
@@ -67,29 +118,53 @@ export class SshFileSource implements FileSource {
     return resolvePath(this, p);
   }
 
-  /** 运行一条远程命令，返回 stdout；非 0 退出码则 reject。 */
-  private exec(cmd: string): Promise<string> {
-    if (this.disposed) return Promise.reject(new Error("SshFileSource disposed"));
-    return new Promise((res, rej) => {
-      let out = "";
-      let err = "";
-      this.client.exec(cmd, (e, stream) => {
-        if (e) return rej(e);
-        stream.on("data", (d: Buffer) => (out += d.toString()));
-        stream.stderr.on("data", (d: Buffer) => (err += d.toString()));
-        stream.on("close", (code: number | null) => {
-          if (code === 0) res(out);
-          else
-            rej(
-              new Error(
-                `remote command failed (exit ${code}): ${cmd.slice(0, 80)}${
-                  err ? " :: " + err.trim().slice(0, 200) : ""
-                }`
-              )
-            );
+  /** 运行一条远程命令，返回 stdout；非 0 退出码或超时则 reject。 */
+  private async exec(cmd: string): Promise<string> {
+    const attempt = (): Promise<string> =>
+      new Promise((res, rej) => {
+        let out = "";
+        let err = "";
+        let settled = false;
+        const done = (fn: () => void) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            fn();
+          }
+        };
+        const timer = setTimeout(
+          () => done(() => rej(new Error(`remote command timed out after ${EXEC_TIMEOUT_MS}ms: ${cmd.slice(0, 80)}`))),
+          EXEC_TIMEOUT_MS
+        );
+        this.client.exec(cmd, (e, stream) => {
+          if (e) return done(() => rej(e));
+          stream.on("data", (d: Buffer) => (out += d.toString()));
+          stream.stderr.on("data", (d: Buffer) => (err += d.toString()));
+          stream.on("close", (code: number | null) => {
+            done(() => {
+              if (code === 0) res(out);
+              else
+                rej(
+                  new Error(
+                    `remote command failed (exit ${code}): ${cmd.slice(0, 80)}${
+                      err ? " :: " + err.trim().slice(0, 200) : ""
+                    }`
+                  )
+                );
+            });
+          });
         });
       });
-    });
+
+    try {
+      await this.ensureConnected();
+      return await attempt();
+    } catch {
+      // 客户端可能在两次调用之间被对端断开：重建一次再试。
+      if (this.disposed) throw new Error("SshFileSource disposed");
+      await this.ensureConnected();
+      return attempt();
+    }
   }
 
   async exists(p: string): Promise<boolean> {
@@ -105,7 +180,7 @@ export class SshFileSource implements FileSource {
     // GNU find：%y=类型(f/d/l...)，%f=basename。-mindepth 1 跳过目录自身。
     let out: string;
     try {
-      out = await this.exec(`find ${this.sh(this.abs(p))} -mindepth 1 -maxdepth 1 -printf '%y\t%f\\n'`);
+      out = await this.exec(`find ${this.sh(this.abs(p))} -mindepth 1 -maxdepth 1 -printf '%y\\t%f\\n'`);
     } catch {
       return []; // 目录不存在或不可读
     }

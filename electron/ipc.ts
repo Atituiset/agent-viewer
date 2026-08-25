@@ -1,14 +1,7 @@
 import { ipcMain } from "electron";
 import { loadMachines, addMachine, removeMachine } from "../src/lib/machines";
-import { detectTools } from "../src/lib/detect";
-import { listClaudeSessionsAll, readClaudeSession } from "../src/lib/claude";
-import { listCodexSessions, readCodexSession } from "../src/lib/codex";
-import { listOpenCodeSessions, readOpenCodeSession } from "../src/lib/opencode";
-import { listGeminiSessions, readGeminiSession } from "../src/lib/gemini";
-import { listDeepSeekSessions, readDeepSeekSession } from "../src/lib/deepseek";
-import { listHermesSessions, readHermesSession } from "../src/lib/hermes";
-import type { ConversationMessage, MachineConfig, ToolSession } from "../src/lib/types";
-import type { FileSource } from "./fs-source/types";
+import { detectTools, getTool } from "../src/lib/detect";
+import type { MachineConfig } from "../src/lib/types";
 import { getSource, disposeSource } from "./source-manager";
 
 function ok<T>(v: T) {
@@ -62,7 +55,7 @@ export function registerIpc() {
   ipcMain.handle("sessions:list", async (_e, machineId, toolId) => {
     try {
       const src = await getSource(machineById(machineId));
-      return ok(await listByTool(src, toolId));
+      return ok(await getTool(toolId).listSessions(src));
     } catch (e) {
       return err(e);
     }
@@ -71,53 +64,9 @@ export function registerIpc() {
   ipcMain.handle("sessions:read", async (_e, machineId, toolId, sessionId, projectPath) => {
     try {
       const src = await getSource(machineById(machineId));
-      return ok(await readByTool(src, toolId, sessionId, projectPath));
+      return ok(await getTool(toolId).readSession(src, sessionId, projectPath));
     } catch (e) {
       return err(e);
     }
   });
-}
-
-async function listByTool(src: FileSource, toolId: string): Promise<ToolSession[]> {
-  switch (toolId) {
-    case "claude-code":
-      return listClaudeSessionsAll(src);
-    case "codex":
-      return listCodexSessions(src);
-    case "opencode":
-      return listOpenCodeSessions(src);
-    case "gemini":
-      return listGeminiSessions(src);
-    case "deepseek":
-      return listDeepSeekSessions(src);
-    case "hermes":
-      return listHermesSessions(src);
-    default:
-      throw new Error("unknown tool: " + toolId);
-  }
-}
-
-async function readByTool(
-  src: FileSource,
-  toolId: string,
-  sessionId: string,
-  projectPath?: string
-): Promise<ConversationMessage[]> {
-  switch (toolId) {
-    case "claude-code":
-      if (!projectPath) throw new Error("claude-code session requires projectPath");
-      return readClaudeSession(src, projectPath, sessionId);
-    case "codex":
-      return readCodexSession(src, sessionId);
-    case "opencode":
-      return readOpenCodeSession(src, sessionId);
-    case "gemini":
-      return readGeminiSession(src, sessionId);
-    case "deepseek":
-      return readDeepSeekSession(src, sessionId);
-    case "hermes":
-      return readHermesSession(src, sessionId);
-    default:
-      throw new Error("unknown tool: " + toolId);
-  }
 }
