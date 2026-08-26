@@ -41,9 +41,16 @@ jobs:
           sudo apt-get install -y libarchive-tools rpm
 
       - name: Build installer
+        # predist 钩子只在 npm run dist 时触发；这里显式跑全链：
+        # generate-icons → generate-installer-assets → build:electron。
         # 只产本地 artifact；发布由最后的 release job 统一做，
         # 避免 electron-builder 直推 Release 与重跑时的 already_exists 冲突。
-        run: npx electron-builder --publish never
+        run: |
+          npm run generate-icons
+          npm run generate-installer-assets
+          npm run build
+          npm run build:electron
+          npx electron-builder --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
