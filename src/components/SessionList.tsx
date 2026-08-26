@@ -7,6 +7,7 @@ interface Props {
   sessions: ToolSession[];
   tool: DetectedTool;
   onSelect: (session: ToolSession) => void;
+  error?: string | null;
 }
 
 function timeAgo(ts: string | number): string {
@@ -21,7 +22,7 @@ function timeAgo(ts: string | number): string {
   return d.toLocaleDateString();
 }
 
-export default function SessionList({ sessions, tool, onSelect }: Props) {
+export default function SessionList({ sessions, tool, onSelect, error }: Props) {
   const [search, setSearch] = useState("");
 
   const filtered = search
@@ -59,6 +60,12 @@ export default function SessionList({ sessions, tool, onSelect }: Props) {
           {filtered.length} session{filtered.length !== 1 ? "s" : ""} found
           {search && filtered.length !== sessions.length && ` (filtered from ${sessions.length})`}
         </p>
+
+        {error && (
+          <div className="mb-6 rounded-lg border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+            <span className="font-medium">Failed to list sessions:</span> {error}
+          </div>
+        )}
 
         <div className="relative mb-6">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -208,6 +208,15 @@ export class SshFileSource implements FileSource {
     return Buffer.from(b64.trim(), "base64");
   }
 
+  async readHead(p: string, maxBytes: number): Promise<string> {
+    return this.exec(`head -c ${Math.floor(maxBytes)} ${this.sh(this.abs(p))}`);
+  }
+
+  async lineCount(p: string): Promise<number> {
+    const out = await this.exec(`grep -cve '^$' ${this.sh(this.abs(p))} || true`);
+    return Number(out.trim()) || 0;
+  }
+
   async stat(p: string): Promise<FileStat> {
     // %W=birth(epoch,未知为0)，%Y=mtime(epoch)
     const out = await this.exec(`stat -c '%W %Y' ${this.sh(this.abs(p))}`);

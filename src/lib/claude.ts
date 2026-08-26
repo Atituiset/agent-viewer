@@ -19,12 +19,13 @@ export async function listClaudeSessionsAll(source: FileSource): Promise<ToolSes
       const fileRel = join(dirRel, f.name);
       try {
         const stat = await source.stat(fileRel);
-        const content = await source.readFile(fileRel);
+        // 只读前 8KB 取标题，行数用 lineCount——不把整个 jsonl 拉回来。
+        const head = await source.readHead(fileRel, 8192);
         result.push({
           id: f.name.replace(".jsonl", ""),
-          title: extractClaudeTitle(content),
+          title: extractClaudeTitle(head),
           createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
-          messageCount: countClaudeMessages(content),
+          messageCount: await source.lineCount(fileRel),
           project: projectName,
           projectPath: entry.name,
         });
@@ -44,10 +45,6 @@ function extractClaudeTitle(content: string): string {
     }
   } catch {}
   return "Untitled";
-}
-
-function countClaudeMessages(content: string): number {
-  return content.split("\n").filter((l) => l.trim()).length;
 }
 
 /** 注意参数顺序：(source, projectPath, sessionId) —— projectPath 在 sessionId 前，与其他解析器不同。 */

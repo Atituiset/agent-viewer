@@ -21,5 +21,9 @@ export interface FileSource {
   readFile(p: string): Promise<string>;
   readFileBuffer(p: string): Promise<Buffer>;
   stat(p: string): Promise<FileStat>;
+  /** 只读文件前 maxBytes 字节（列表页取 title 用，避免全文件传输）。 */
+  readHead(p: string, maxBytes: number): Promise<string>;
+  /** 统计非空行数（jsonl 会话的消息数）。 */
+  lineCount(p: string): Promise<number>;
   dispose?(): Promise<void>;
 }
