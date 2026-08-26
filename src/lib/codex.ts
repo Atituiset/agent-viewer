@@ -20,9 +20,8 @@ export async function listCodexSessions(source: FileSource): Promise<ToolSession
   const sessions: ToolSession[] = [];
   for (const f of files) {
     try {
-      const content = await source.readFile(f.rel);
-      const messageCount = content.split("\n").filter((l) => l.trim()).length;
       const stat = await source.stat(f.rel);
+      const messageCount = await source.lineCount(f.rel);
       sessions.push({
         id: f.name.replace(".jsonl", ""),
         title: f.name.replace(/^rollout-/, "").replace(/\.jsonl$/, "").replace(/-/g, " ").slice(0, 80),

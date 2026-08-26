@@ -8,9 +8,10 @@ interface Props {
   messages: ConversationMessage[];
   sessionMeta?: ToolSession | null;
   tool?: DetectedTool | null;
+  error?: string | null;
 }
 
-export default function ConversationView({ messages, sessionMeta, tool }: Props) {
+export default function ConversationView({ messages, sessionMeta, tool, error }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const [search, setSearch] = useState("");
@@ -87,6 +88,11 @@ export default function ConversationView({ messages, sessionMeta, tool }: Props)
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-8">
         <div className="max-w-5xl mx-auto space-y-5">
+          {error && (
+            <div className="rounded-lg border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+              <span className="font-medium">Failed to load conversation:</span> {error}
+            </div>
+          )}
           {filtered.map((msg, i) => (
             <MessageBubble key={msg.id || i} message={msg} />
           ))}

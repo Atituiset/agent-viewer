@@ -1,6 +1,6 @@
 {
   "name": "agent-viewer",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "private": true,
   "description": "Local & remote agent session viewer (Claude Code / Codex / OpenCode / Gemini / DeepSeek / Hermes)",
   "author": "Atituiset <atituiset@example.com>",
@@ -23,12 +23,13 @@
     "appId": "com.agentviewer.app",
     "productName": "Agent Viewer",
     "copyright": "Copyright © 2026 Atituiset",
-    "icon": "build/icon.svg",
+    "icon": "build/icon.ico",
     "files": [
       "out/**/*",
       "dist-electron/**/*",
       "build/icon.svg",
       "build/icon.png",
+      "build/icons/**/*",
       "build/installerHeader.bmp",
       "build/installerSidebar.bmp",
       "node_modules/**/*",
@@ -44,14 +45,24 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "icon": "build/icons"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icons"
     },
     "nsis": {
       "oneClick": false,

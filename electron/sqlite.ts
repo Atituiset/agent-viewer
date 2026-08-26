@@ -12,6 +12,11 @@ export function openDbFromBuffer(buf: Buffer): { db: Database.Database; cleanup:
   const db = new Database(tmpPath);
   db.pragma("journal_mode = WAL");
   db.pragma("wal_checkpoint(TRUNCATE)");
-  const cleanup = () => { try { db.close(); } catch {} try { fs.unlinkSync(tmpPath); } catch {} };
+  const cleanup = () => {
+    try { db.close(); } catch {}
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try { fs.unlinkSync(tmpPath + suffix); } catch {}
+    }
+  };
   return { db, cleanup };
 }

@@ -18,7 +18,14 @@
 /out/
 
 # production
-/build
+/build/*
+# 图标源与生成产物是打包输入，必须入库（CI checkout 需要）
+!/build/icon.svg
+!/build/icon.png
+!/build/icons/
+!/build/icon.ico
+!/build/installerHeader.bmp
+!/build/installerSidebar.bmp
 
 # electron build output
 /dist-electron

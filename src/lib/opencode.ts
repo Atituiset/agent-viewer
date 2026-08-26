@@ -1,4 +1,3 @@
-import { join } from "../../electron/fs-source/util";
 import { openDbFromBuffer } from "../../electron/sqlite";
 import type { FileSource } from "../../electron/fs-source/types";
 import type { OpenCodePart, ConversationMessage, ToolCall, ToolSession } from "./types";

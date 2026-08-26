@@ -64,4 +64,16 @@ export class FakeFileSource implements FileSource {
     const t = new Date(0);
     return { mtime: t, birthtime: t };
   }
+
+  async readHead(p: string, maxBytes: number): Promise<string> {
+    const b = this.files.get(this.resolve(p));
+    if (!b) throw new Error("not found: " + p);
+    return b.subarray(0, maxBytes).toString("utf-8");
+  }
+
+  async lineCount(p: string): Promise<number> {
+    const b = this.files.get(this.resolve(p));
+    if (!b) throw new Error("not found: " + p);
+    return b.toString("utf-8").split("\n").filter((l) => l.trim()).length;
+  }
 }

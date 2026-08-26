@@ -18,8 +18,14 @@ export default function Home() {
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [selectedTool, setSelectedTool] = useState<DetectedTool | null>(null);
   const [sessions, setSessions] = useState<ToolSession[]>([]);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<ToolSession | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  // LIVE 轮询用的会话文件指纹；undefined=未初始化，null=工具无指纹（直接刷新）。
+  const [lastStamp, setLastStamp] = useState<string | null | undefined>(undefined);
+  // toolId -> requiresProjectPath，来自主进程 registry 元数据（避免硬编码 "claude-code"）。
+  const toolMetaRef = useRef<Map<string, boolean>>(new Map());
   const [loading, setLoading] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
   const [showAddMachine, setShowAddMachine] = useState(false);
@@ -27,7 +33,13 @@ export default function Home() {
 
   useEffect(() => {
     window.api.machines.list().then((r) => { if (r.data) setMachines(r.data); }).catch(() => {});
+    window.api.tools.meta().then((r) => {
+      if (r.data) toolMetaRef.current = new Map(r.data.map((t) => [t.id, t.requiresProjectPath]));
+    }).catch(() => {});
   }, []);
+
+  const projectPathFor = useCallback((toolId: string, session: ToolSession): string | undefined =>
+    toolMetaRef.current.get(toolId) ? session.projectPath : undefined, []);
 
   const loadTools = useCallback(async (machine: MachineConfig) => {
     setSelectedMachine(machine);
@@ -54,11 +66,16 @@ export default function Home() {
     if (!selectedMachine) return;
     setSelectedTool(tool);
     setLoading(true);
+    setSessionsError(null);
     try {
       const r = await window.api.sessions.list(selectedMachine.id, tool.id);
-      setSessions(r.data || []);
+      if (r.error) setSessionsError(r.error);
+      else setSessions(r.data || []);
       setView("sessions");
-    } catch {}
+    } catch (e) {
+      setSessionsError(String(e));
+      setView("sessions");
+    }
     setLoading(false);
   }, [selectedMachine]);
 
@@ -67,33 +84,51 @@ export default function Home() {
     setSelectedSession(session);
     setLoading(true);
     setMessages([]);
+    setSessionError(null);
+    setLastStamp(undefined);
     try {
       const r = await window.api.sessions.read(
         selectedMachine.id,
         selectedTool.id,
         session.id,
-        selectedTool.id === "claude-code" ? session.projectPath : undefined
+        projectPathFor(selectedTool.id, session)
       );
-      setMessages(r.data || []);
+      if (r.error) setSessionError(r.error);
+      else setMessages(r.data || []);
       setView("conversation");
     } catch (e) {
-      console.error("Failed to load session:", e);
+      setSessionError(String(e));
+      setView("conversation");
     }
     setLoading(false);
-  }, [selectedTool, selectedMachine]);
+  }, [selectedTool, selectedMachine, projectPathFor]);
 
-  const refreshSession = useCallback(async () => {
+  const refreshSession = useCallback(async (force = false) => {
     if (!selectedSession || !selectedTool || !selectedMachine) return;
     try {
+      // LIVE 轮询：先比对文件指纹，没变就不重读全文。
+      if (!force) {
+        const s = await window.api.sessions.stamp(
+          selectedMachine.id,
+          selectedTool.id,
+          selectedSession.id,
+          projectPathFor(selectedTool.id, selectedSession)
+        );
+        const stamp = s.data ?? null;
+        if (stamp !== null && stamp === lastStamp) return;
+        setLastStamp(stamp);
+      }
       const r = await window.api.sessions.read(
         selectedMachine.id,
         selectedTool.id,
         selectedSession.id,
-        selectedTool.id === "claude-code" ? selectedSession.projectPath : undefined
+        projectPathFor(selectedTool.id, selectedSession)
       );
-      setMessages(r.data || []);
+      // 静默刷新（LIVE 轮询）：只在有数据时更新，错误不打断当前内容。
+      if (r.error) console.error("refresh failed:", r.error);
+      else setMessages(r.data || []);
     } catch {}
-  }, [selectedSession, selectedTool, selectedMachine]);
+  }, [selectedSession, selectedTool, selectedMachine, projectPathFor, lastStamp]);
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -155,7 +190,7 @@ export default function Home() {
               {liveMode ? "● LIVE" : "○ LIVE"}
             </button>
             <button
-              onClick={refreshSession}
+              onClick={() => refreshSession(true)}
               className="text-sm px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
             >
               ↻
@@ -183,9 +218,9 @@ export default function Home() {
         ) : view === "tools" ? (
           <ToolCards tools={tools} machine={selectedMachine!} onSelect={loadSessions} error={toolsError} />
         ) : view === "sessions" ? (
-          <SessionList sessions={sessions} tool={selectedTool!} onSelect={loadSession} />
+          <SessionList sessions={sessions} tool={selectedTool!} onSelect={loadSession} error={sessionsError} />
         ) : (
-          <ConversationView messages={messages} sessionMeta={selectedSession} tool={selectedTool!} />
+          <ConversationView messages={messages} sessionMeta={selectedSession} tool={selectedTool!} error={sessionError} />
         )}
       </div>
 

@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Build artifacts & one-off scripts (pre-existing lint debt, not app code):
+    "dist-electron/**",
+    "release/**",
+    "scripts/**",
   ]),
 ]);
 
