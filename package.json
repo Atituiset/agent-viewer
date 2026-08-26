@@ -1,6 +1,6 @@
 {
   "name": "agent-viewer",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Local & remote agent session viewer (Claude Code / Codex / OpenCode / Gemini / DeepSeek / Hermes)",
   "author": "Atituiset <atituiset@example.com>",
@@ -16,6 +16,7 @@
     "electron:dev": "AGENT_VIEWER_DEV=1 npm run build:electron && electron .",
     "generate-icons": "node scripts/generate-icons.js",
     "generate-installer-assets": "node scripts/generate-installer-assets.js",
+    "smoke": "npm run build:electron && node scripts/smoke.js",
     "predist": "npm run generate-icons && npm run generate-installer-assets",
     "dist": "npm run build && npm run build:electron && electron-builder"
   },

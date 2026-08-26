@@ -31,6 +31,12 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  if (process.env.AGENT_VIEWER_SMOKE === "1") {
+    // CI 冒烟：主进程 bundle（含 better-sqlite3 原生绑定）能加载并 ready 即通过。
+    console.log("SMOKE_OK");
+    app.exit(0);
+    return;
+  }
   ensureDefaultMachine();
   registerIpc();
   createWindow();

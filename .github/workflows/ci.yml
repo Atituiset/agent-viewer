@@ -45,3 +45,13 @@ jobs:
 
       - name: Build Next.js renderer
         run: npm run build
+
+      # 冒烟：打包前验证主进程 bundle（含 better-sqlite3 原生绑定）能真正启动。
+      # Linux 无显示环境，用 xvfb 包一层；Win/macOS runner 自带图形会话。
+      - name: Smoke test — app launches (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/smoke.js
+
+      - name: Smoke test — app launches (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: node scripts/smoke.js
