@@ -14,7 +14,13 @@ export async function listClaudeSessionsAll(source: FileSource): Promise<ToolSes
     const dirRel = join(ROOT, entry.name);
     const projectName = entry.name.replace(/^-/, "").replace(/-/g, "/").replace(/^home\/[^/]+\//, "~/");
 
-    for (const f of await source.readDir(dirRel)) {
+    let files;
+    try {
+      files = await source.readDir(dirRel);
+    } catch {
+      continue; // 单个 project 目录不可读不该归零整个工具
+    }
+    for (const f of files) {
       if (!f.name.endsWith(".jsonl")) continue;
       const fileRel = join(dirRel, f.name);
       try {

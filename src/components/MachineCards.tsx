@@ -56,6 +56,14 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
                   <span className="px-2 py-0.5 rounded bg-zinc-800 uppercase tracking-wider font-medium">
                     {m.type}
                   </span>
+                  {m.auto && (
+                    <span
+                      className="px-2 py-0.5 rounded bg-zinc-800/50 text-zinc-500 tracking-wider font-medium"
+                      title="Discovered from ~/.ssh/config"
+                    >
+                      auto
+                    </span>
+                  )}
                   <span>{m.host}</span>
                 </div>
               </div>

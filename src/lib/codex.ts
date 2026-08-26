@@ -5,7 +5,13 @@ import type { ConversationMessage, ToolSession } from "./types";
 const ROOT = ".codex/sessions";
 
 async function walk(source: FileSource, dir: string, acc: { rel: string; name: string }[]) {
-  for (const entry of await source.readDir(dir)) {
+  let entries;
+  try {
+    entries = await source.readDir(dir);
+  } catch {
+    return; // 单层目录不可读只跳过该子树，不让整个工具归零
+  }
+  for (const entry of entries) {
     const rel = join(dir, entry.name);
     if (entry.isDirectory) await walk(source, rel, acc);
     else if (entry.name.endsWith(".jsonl")) acc.push({ rel, name: entry.name });

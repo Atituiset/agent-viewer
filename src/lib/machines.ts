@@ -3,9 +3,12 @@ import path from "path";
 import os from "os";
 import { safeStorage } from "electron";
 import type { MachineConfig } from "./types";
+import { discoverSshConfigMachines } from "./ssh-config";
 
 const CONFIG_DIR = path.join(os.homedir(), ".config", "agent-viewer");
 const MACHINES_FILE = path.join(CONFIG_DIR, "machines.json");
+// 被用户删掉的自动发现机器 id，防止下次 load 又冒出来。
+const HIDDEN_AUTO_FILE = path.join(CONFIG_DIR, "ssh-config-hidden.json");
 
 // machines.json 中密码字段的加密标记前缀。
 const ENC_PREFIX = "enc:v1:";
@@ -65,23 +68,50 @@ function atomicWrite(file: string, data: string) {
 
 export function loadMachines(): MachineConfig[] {
   ensureConfigDir();
+  let persisted: MachineConfig[];
   if (!fs.existsSync(MACHINES_FILE)) {
-    const defaults = getDefaultMachines();
-    saveMachines(defaults);
-    return defaults;
+    persisted = getDefaultMachines();
+    saveMachines(persisted);
+  } else {
+    try {
+      const data = JSON.parse(fs.readFileSync(MACHINES_FILE, "utf-8")) as MachineConfig[];
+      if (!Array.isArray(data)) throw new Error("bad format");
+      persisted = restoreFromDisk(data);
+    } catch {
+      persisted = getDefaultMachines();
+    }
   }
+
+  // 合并 ~/.ssh/config 自动发现的机器：跳过被用户删过的、以及与已有机器重复的。
+  const hidden = new Set(loadHiddenAuto());
+  const seen = new Set(persisted.map((m) => `${m.user}@${m.host}:${m.port}`));
+  const discovered = discoverSshConfigMachines().filter(
+    (m) =>
+      !hidden.has(m.id) &&
+      !persisted.some((x) => x.id === m.id) &&
+      !seen.has(`${m.user}@${m.host}:${m.port}`)
+  );
+  return [...persisted, ...discovered];
+}
+
+function loadHiddenAuto(): string[] {
   try {
-    const data = JSON.parse(fs.readFileSync(MACHINES_FILE, "utf-8")) as MachineConfig[];
-    if (!Array.isArray(data)) throw new Error("bad format");
-    return restoreFromDisk(data);
+    const data = JSON.parse(fs.readFileSync(HIDDEN_AUTO_FILE, "utf-8"));
+    return Array.isArray(data) ? data.filter((x) => typeof x === "string") : [];
   } catch {
-    return getDefaultMachines();
+    return [];
   }
+}
+
+function hideAuto(id: string) {
+  ensureConfigDir();
+  atomicWrite(HIDDEN_AUTO_FILE, JSON.stringify([...new Set([...loadHiddenAuto(), id])], null, 2));
 }
 
 export function saveMachines(machines: MachineConfig[]) {
   ensureConfigDir();
-  atomicWrite(MACHINES_FILE, JSON.stringify(sanitizeForDisk(machines), null, 2));
+  // auto 机器是 ~/.ssh/config 的派生物，不落盘。
+  atomicWrite(MACHINES_FILE, JSON.stringify(sanitizeForDisk(machines.filter((m) => !m.auto)), null, 2));
 }
 
 export function addMachine(machine: Omit<MachineConfig, "id" | "status">): MachineConfig {
@@ -100,8 +130,11 @@ export function addMachine(machine: Omit<MachineConfig, "id" | "status">): Machi
 }
 
 export function removeMachine(id: string) {
-  const machines = loadMachines().filter((m) => m.id !== id);
-  saveMachines(machines);
+  const all = loadMachines();
+  const target = all.find((m) => m.id === id);
+  saveMachines(all.filter((m) => m.id !== id));
+  // 自动发现的机器不在 machines.json 里，记 tombstone 防止下次又出现。
+  if (target?.auto) hideAuto(id);
 }
 
 export function getDefaultMachines(): MachineConfig[] {

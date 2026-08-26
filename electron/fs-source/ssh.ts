@@ -1,4 +1,7 @@
 import { Client } from "ssh2";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import type { FileSource, DirEntry, FileStat } from "./types";
 import { resolvePath } from "./util";
 
@@ -8,6 +11,27 @@ export interface SshOptions {
   username: string;
   password?: string;
   privateKey?: string;
+}
+
+/**
+ * 解析私钥：machine.sshKey 约定存的是「路径」（AddMachineModal 也是这么引导的），
+ * 读文件拿内容；读不到则当内联内容兼容。未配置时回退常见默认私钥路径。
+ */
+export function resolvePrivateKey(raw: string | undefined, home = os.homedir()): Buffer | undefined {
+  if (raw) {
+    const expanded = raw.startsWith("~/") ? path.join(home, raw.slice(2)) : raw;
+    try {
+      return fs.readFileSync(expanded);
+    } catch {
+      return Buffer.from(raw);
+    }
+  }
+  for (const name of ["id_ed25519", "id_rsa", "id_ecdsa"]) {
+    try {
+      return fs.readFileSync(path.join(home, ".ssh", name));
+    } catch {}
+  }
+  return undefined;
 }
 
 const EXEC_TIMEOUT_MS = 30_000;
@@ -61,7 +85,10 @@ export class SshFileSource implements FileSource {
       port: this.opts.port,
       username: this.opts.username,
       password: this.opts.password,
-      privateKey: this.opts.privateKey ? Buffer.from(this.opts.privateKey) : undefined,
+      privateKey: resolvePrivateKey(this.opts.privateKey),
+      // 有 ssh-agent 时让它参与认证（排在 publickey/password 前后由 ssh2 决定），
+      // 这样「任何能 ssh 上去的 Linux 机器」零配置即可探测。
+      agent: process.env.SSH_AUTH_SOCK || undefined,
       readyTimeout: CONNECT_TIMEOUT_MS,
       keepaliveInterval: 10_000,
       keepaliveCountMax: 3,

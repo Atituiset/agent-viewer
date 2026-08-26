@@ -122,7 +122,9 @@ export async function detectTools(source: FileSource): Promise<DetectedTool[]> {
       if (detected) {
         try {
           sessionCount = (await tool.listSessions(source)).length;
-        } catch {}
+        } catch (e) {
+          console.error(`[detect] ${tool.id} listSessions failed:`, e);
+        }
       }
       return {
         id: tool.id,

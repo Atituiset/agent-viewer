@@ -83,4 +83,19 @@ describe("claude parser", () => {
   it("returns empty when root missing", async () => {
     expect(await listClaudeSessionsAll(new FakeFileSource())).toEqual([]);
   });
+
+  it("skips an unreadable project dir instead of zeroing the whole tool", async () => {
+    class FlakySource extends FakeFileSource {
+      async readDir(p: string) {
+        if (p.includes("broken")) throw new Error("EPERM");
+        return super.readDir(p);
+      }
+    }
+    const src = new FlakySource()
+      .add(".claude/projects/-home-user-broken/s0.jsonl", [USER].join("\n") + "\n")
+      .add(".claude/projects/-home-user-good/s1.jsonl", [TITLE, USER, ASST].join("\n") + "\n");
+    const sessions = await listClaudeSessionsAll(src);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe("s1");
+  });
 });

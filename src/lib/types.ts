@@ -9,6 +9,8 @@ export interface MachineConfig {
   sshKey?: string;
   password?: string;
   status: "online" | "offline" | "unknown";
+  /** true = 从 ~/.ssh/config 自动发现的机器，不写进 machines.json。 */
+  auto?: boolean;
 }
 
 export interface ToolDefinition {
