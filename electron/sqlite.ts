@@ -2,7 +2,6 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import type { FileSource } from "./fs-source/types";
-import { WslFileSource } from "./fs-source/wsl";
 
 type SqliteDatabase = import("better-sqlite3").Database;
 
@@ -47,20 +46,40 @@ export async function openDbFromBuffer(buf: Buffer): Promise<{ db: SqliteDatabas
 }
 
 /**
+ * 能「在文件所在机器上直接查 sqlite」的 source 实现此能力：
+ * WSL 走 wsl.exe + python3，SSH 走 exec + python3（见各 source 实现注释）。
+ */
+export interface SqliteQueryable {
+  querySqlite(rel: string, sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+}
+
+function asQueryable(source: FileSource): (FileSource & SqliteQueryable) | null {
+  return typeof (source as unknown as SqliteQueryable).querySqlite === "function"
+    ? (source as FileSource & SqliteQueryable)
+    : null;
+}
+
+/**
  * 打开 source 上的 sqlite 并回调，按 source 能力选路径：
- * - WSL source：UNC 上的 db SQLite 直开必败（9p 无字节范围锁），走 wsl.exe + python3；
- * - 其他本地 source：直接只读打开原文件（整库拷贝对 GB 级 db 不可行）；
- * - 远程 source（SSH，无 localPath）或直开失败：回退整库拷贝。
+ * - 实现了 querySqlite 的 source（WSL/SSH）：远端直接查——UNC 9p 上 SQLite 直开必败，
+ *   GB 级 db 整库拷贝也不可行；
+ * - 其他本地 source：直接只读打开原文件；
+ * - 以上都不行：回退整库拷贝（小 db 没问题）。
  */
 export async function withSqliteDb<T>(
   source: FileSource,
   rel: string,
   fn: (db: DbLike) => T | Promise<T>
 ): Promise<T> {
-  if (source instanceof WslFileSource) {
-    return fn({
-      prepare: (sql) => ({ all: (...params) => source.wslQuery(rel, sql, params) }),
-    });
+  const queryable = asQueryable(source);
+  if (queryable) {
+    try {
+      return await fn({
+        prepare: (sql) => ({ all: (...params) => queryable.querySqlite(rel, sql, params) }),
+      });
+    } catch {
+      // 远端查询失败（如无 python3）：落回整库拷贝。
+    }
   }
   const local = source.localPath?.(rel);
   if (local) {

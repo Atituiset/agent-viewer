@@ -37,6 +37,16 @@ export function resolvePrivateKey(raw: string | undefined, home = os.homedir()):
 const EXEC_TIMEOUT_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 15_000;
 
+// 远端 python3 查询脚本：argv 均为 base64（db 路径 / SQL / 参数 JSON），rows 以 JSON 输出。
+const REMOTE_PY_QUERY = [
+  "import sqlite3,sys,json,base64",
+  "d=lambda s:base64.b64decode(s).decode()",
+  'db=sqlite3.connect("file:%s?mode=ro"%d(sys.argv[1]),uri=True)',
+  "cur=db.execute(d(sys.argv[2]),json.loads(d(sys.argv[3])))",
+  "cols=[c[0] for c in cur.description]",
+  "print(json.dumps([dict(zip(cols,r)) for r in cur.fetchall()]))",
+].join(";");
+
 /**
  * SSH FileSource 走 `exec`（远程 shell 命令），而非 SFTP 子系统。
  * SFTP 子系统在很多 sshd 上是可选/被关掉的（缺它会让检测静默失败）；
@@ -242,6 +252,20 @@ export class SshFileSource implements FileSource {
   async lineCount(p: string): Promise<number> {
     const out = await this.exec(`grep -cve '^$' ${this.sh(this.abs(p))} || true`);
     return Number(out.trim()) || 0;
+  }
+
+  /**
+   * 远端 sqlite 查询：整库 base64 拉回对 GB 级 db 不可行（内存/超时），
+   * 改为在远端用 python3（stdlib sqlite3）执行，只把 rows JSON 拉回来。
+   * 脚本/SQL/参数全部 base64 编码后拼进命令，天然 shell 安全。
+   * 远端无 python3 时 exec 失败，由调用方（withSqliteDb）回退整库拷贝。
+   */
+  async querySqlite(rel: string, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
+    const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
+    const scriptB64 = b64(REMOTE_PY_QUERY);
+    const cmd = `echo ${scriptB64} | base64 -d | python3 - ${b64(this.abs(rel))} ${b64(sql)} ${b64(JSON.stringify(params))}`;
+    const out = await this.exec(cmd);
+    return JSON.parse(out);
   }
 
   async stat(p: string): Promise<FileStat> {

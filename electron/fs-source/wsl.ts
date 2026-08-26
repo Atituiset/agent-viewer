@@ -78,7 +78,7 @@ export class WslFileSource extends LocalFileSource {
     return "/" + parts.slice(2).join("/") + "/" + rel;
   }
 
-  wslQuery(dbRel: string, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
+  querySqlite(dbRel: string, sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
     return new Promise((resolve, reject) => {
       execFile(
         "wsl.exe",
