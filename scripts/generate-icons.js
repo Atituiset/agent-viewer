@@ -159,6 +159,7 @@ function buildIco(images) {
   const count = images.length;
   const dir = Buffer.alloc(6);
   dir.writeUInt16LE(0, 0);
+  dir.writeUInt16LE(1, 2); // type 1 = icon
   dir.writeUInt16LE(count, 4);
   let offset = 6 + count * 16;
   const entries = [];
