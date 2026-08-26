@@ -49,6 +49,10 @@ export class LocalFileSource implements FileSource {
     }
   }
 
+  localPath(p: string): string {
+    return resolvePath(this, p);
+  }
+
   async lineCount(p: string): Promise<number> {
     // 流式计数，不整文件进内存。
     const rs = fs.createReadStream(resolvePath(this, p), "utf-8");

@@ -25,5 +25,7 @@ export interface FileSource {
   readHead(p: string, maxBytes: number): Promise<string>;
   /** 统计非空行数（jsonl 会话的消息数）。 */
   lineCount(p: string): Promise<number>;
+  /** 本地 source 返回绝对路径（sqlite 直接打开用，避免整库拷贝）；远程 source 不实现。 */
+  localPath?(p: string): string;
   dispose?(): Promise<void>;
 }

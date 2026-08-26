@@ -1,23 +1,17 @@
-import { openDbFromBuffer } from "../../electron/sqlite";
+import { withSqliteDb, type DbLike } from "../../electron/sqlite";
 import type { FileSource } from "../../electron/fs-source/types";
 import type { OpenCodePart, ConversationMessage, ToolCall, ToolSession } from "./types";
 
 const DB_REL = ".local/share/opencode/opencode.db";
 
-async function withDb<T>(source: FileSource, fn: (db: import("better-sqlite3").Database) => T): Promise<T> {
-  const buf = await source.readFileBuffer(DB_REL);
-  const { db, cleanup } = openDbFromBuffer(buf);
-  try {
-    return fn(db);
-  } finally {
-    cleanup();
-  }
+async function withDb<T>(source: FileSource, fn: (db: DbLike) => T | Promise<T>): Promise<T> {
+  return withSqliteDb(source, DB_REL, fn);
 }
 
 export async function listOpenCodeSessions(source: FileSource): Promise<ToolSession[]> {
   if (!(await source.exists(DB_REL))) return [];
-  return withDb(source, (db) => {
-    const rows = db.prepare(`SELECT id, title, directory, model, cost, tokens_input, tokens_output, time_created FROM session ORDER BY time_created DESC`).all() as Record<string, unknown>[];
+  return withDb(source, async (db) => {
+    const rows = (await db.prepare(`SELECT id, title, directory, model, cost, tokens_input, tokens_output, time_created FROM session ORDER BY time_created DESC`).all()) as Record<string, unknown>[];
     return rows.map((r) => ({
       id: r.id as string,
       title: (r.title as string) || "Untitled",
@@ -34,12 +28,12 @@ export async function listOpenCodeSessions(source: FileSource): Promise<ToolSess
 
 export async function readOpenCodeSession(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
   if (!(await source.exists(DB_REL))) return [];
-  return withDb(source, (db) => {
-    const messages = db.prepare(`SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created`).all(sessionId) as { id: string; data: string; time_created: number }[];
+  return withDb(source, async (db) => {
+    const messages = (await db.prepare(`SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created`).all(sessionId)) as { id: string; data: string; time_created: number }[];
     const result: ConversationMessage[] = [];
     for (const msg of messages) {
       const msgData = JSON.parse(msg.data) as { role: string };
-      const parts = db.prepare(`SELECT id, data FROM part WHERE message_id = ? ORDER BY time_created`).all(msg.id) as { id: string; data: string }[];
+      const parts = (await db.prepare(`SELECT id, data FROM part WHERE message_id = ? ORDER BY time_created`).all(msg.id)) as { id: string; data: string }[];
       const parsedParts: OpenCodePart[] = parts.map((p) => JSON.parse(p.data) as OpenCodePart);
       const role = msgData.role;
       let content = "";

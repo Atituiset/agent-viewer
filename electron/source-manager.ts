@@ -2,7 +2,7 @@ import type { MachineConfig } from "../src/lib/types";
 import { TOOLS } from "../src/lib/registry";
 import { LocalFileSource } from "./fs-source/local";
 import { SshFileSource } from "./fs-source/ssh";
-import { listWslHomes } from "./fs-source/wsl";
+import { listWslHomes, WslFileSource } from "./fs-source/wsl";
 import type { FileSource } from "./fs-source/types";
 
 const cache = new Map<string, FileSource>();
@@ -57,8 +57,8 @@ export async function getSources(machine: MachineConfig): Promise<FileSource[]> 
   if (cached) return cached;
 
   const sources = [primary];
-  for (const home of await listWslHomes()) {
-    const src = new LocalFileSource(home);
+  for (const { home, distro } of await listWslHomes()) {
+    const src = new WslFileSource(home, distro);
     try {
       const hit = await Promise.any(
         TOOLS.flatMap((t) =>
