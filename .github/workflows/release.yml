@@ -41,9 +41,10 @@ jobs:
           sudo apt-get install -y libarchive-tools rpm
 
       - name: Build installer
-        run: npm run dist
+        # 只产本地 artifact；发布由最后的 release job 统一做，
+        # 避免 electron-builder 直推 Release 与重跑时的 already_exists 冲突。
+        run: npx electron-builder --publish never
         env:
-          # electron-builder 自动从 tag 推断版本；发布到 GitHub Releases 需要 token
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
