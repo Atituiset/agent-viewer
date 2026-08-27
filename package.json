@@ -1,6 +1,6 @@
 {
   "name": "agent-viewer",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Local & remote agent session viewer (Claude Code / Codex / OpenCode / Gemini / DeepSeek / Hermes)",
   "author": "Atituiset <atituiset@example.com>",
