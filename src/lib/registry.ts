@@ -6,6 +6,7 @@ import { listOpenCodeSessions, readOpenCodeSession } from "./opencode";
 import { listGeminiSessions, readGeminiSession } from "./gemini";
 import { listDeepSeekSessions, readDeepSeekSession } from "./deepseek";
 import { listHermesSessions, readHermesSession } from "./hermes";
+import { listKimiSessions, readKimiSession } from "./kimi";
 
 /**
  * Agent 工具注册表——加一个新 agent 只需：
@@ -95,6 +96,16 @@ export const TOOLS: ToolEntry[] = [
     detectPaths: [".hermes/sessions"],
     listSessions: listHermesSessions,
     readSession: readHermesSession,
+  },
+  {
+    id: "kimi-code",
+    name: "Kimi Code",
+    icon: "🌙",
+    color: "#eab308",
+    description: "Kimi Code CLI sessions",
+    detectPaths: [".kimi-code/sessions"],
+    listSessions: listKimiSessions,
+    readSession: readKimiSession,
   },
 ];
 
