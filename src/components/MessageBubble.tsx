@@ -7,6 +7,8 @@ import ToolCallBlock from "./ToolCallBlock";
 
 interface Props {
   message: ConversationMessage;
+  /** 摘要模式：长文折叠、工具调用合并为一行、thinking 隐藏。 */
+  compact?: boolean;
 }
 
 const SOURCE_STYLES: Record<string, { color: string; label: string }> = {
@@ -21,11 +23,23 @@ const SOURCE_STYLES: Record<string, { color: string; label: string }> = {
   gemini: { color: "text-cyan-400", label: "Gemini" },
 };
 
-export default function MessageBubble({ message }: Props) {
+const CLAMP_CHARS = 600;
+
+function summarizeTools(toolCalls: NonNullable<ConversationMessage["toolCalls"]>): string {
+  const counts = new Map<string, number>();
+  for (const tc of toolCalls) counts.set(tc.name, (counts.get(tc.name) || 0) + 1);
+  const parts = Array.from(counts.entries()).map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
+  return `${toolCalls.length} 次调用: ${parts.join(", ")}`;
+}
+
+export default function MessageBubble({ message, compact }: Props) {
   const [showThinking, setShowThinking] = useState(false);
+  const [expandContent, setExpandContent] = useState(false);
+  const [expandTools, setExpandTools] = useState(false);
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const style = SOURCE_STYLES[message.source] || { color: "text-zinc-400", label: message.source };
+  const isLong = message.content.length > CLAMP_CHARS;
 
   return (
     <div className={`${isUser ? "ml-auto max-w-[88%]" : "mr-auto max-w-full"}`}>
@@ -54,7 +68,7 @@ export default function MessageBubble({ message }: Props) {
           </span>
         </div>
 
-        {message.thinking && (
+        {!compact && message.thinking && (
           <div className="mb-3">
             <button
               onClick={() => setShowThinking(!showThinking)}
@@ -71,11 +85,58 @@ export default function MessageBubble({ message }: Props) {
           </div>
         )}
 
-        {message.content && <MarkdownContent content={message.content} />}
+        {message.content && (
+          compact && isLong && !expandContent ? (
+            <div>
+              <div className="max-h-36 overflow-hidden">
+                <MarkdownContent content={message.content} />
+              </div>
+              <button
+                onClick={() => setExpandContent(true)}
+                className="text-[11px] text-blue-400 hover:text-blue-300 mt-1"
+              >
+                ▾ 展开全文（{message.content.length.toLocaleString()} 字符）
+              </button>
+            </div>
+          ) : (
+            <div>
+              <MarkdownContent content={message.content} />
+              {compact && isLong && (
+                <button
+                  onClick={() => setExpandContent(false)}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-300 mt-1"
+                >
+                  ▴ 收起
+                </button>
+              )}
+            </div>
+          )
+        )}
 
-        {message.toolCalls?.map((tool, i) => (
-          <ToolCallBlock key={`${tool.name}-${i}`} tool={tool} />
-        ))}
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          compact && !expandTools ? (
+            <button
+              onClick={() => setExpandTools(true)}
+              className="mt-2 text-[11px] font-mono text-amber-400/90 hover:text-amber-300"
+            >
+              ⚙ {summarizeTools(message.toolCalls)} ▾
+            </button>
+          ) : (
+            <div>
+              {message.toolCalls.map((tool, i) => (
+                <ToolCallBlock key={`${tool.name}-${i}`} tool={tool} />
+              ))}
+              {compact && (
+                <button
+                  onClick={() => setExpandTools(false)}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-300 mt-1"
+                >
+                  ▴ 收起工具
+                </button>
+              )}
+            </div>
+          )
+        )}
       </div>
     </div>
   );

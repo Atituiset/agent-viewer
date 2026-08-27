@@ -17,6 +17,8 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
   const prevSessionIdRef = useRef<string | null>(null);
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"waterfall" | "swimlane">("waterfall");
+  const [density, setDensity] = useState<"compact" | "full">("compact");
+  const compact = density === "compact";
 
   const filtered = useMemo(() => {
     if (!search) return messages;
@@ -102,11 +104,26 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
               </button>
             ))}
           </div>
+          <div className="flex gap-1 flex-shrink-0">
+            {(["compact", "full"] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setDensity(d)}
+                className={`text-[11px] px-2.5 py-1.5 rounded-md border transition-colors font-medium ${
+                  density === d
+                    ? "border-blue-600 text-blue-400 bg-blue-900/20"
+                    : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {d === "compact" ? "摘要" : "详细"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {viewMode === "swimlane" ? (
-        <SwimlaneView messages={filtered} />
+        <SwimlaneView messages={filtered} compact={compact} />
       ) : (
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-8">
         <div className="max-w-5xl mx-auto space-y-5">
@@ -116,7 +133,7 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
             </div>
           )}
           {filtered.map((msg, i) => (
-            <MessageBubble key={msg.id || i} message={msg} />
+            <MessageBubble key={msg.id || i} message={msg} compact={compact} />
           ))}
           {filtered.length === 0 && messages.length > 0 && (
             <div className="text-center text-zinc-600 py-16">

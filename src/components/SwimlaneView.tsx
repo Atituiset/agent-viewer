@@ -6,6 +6,7 @@ import MessageBubble from "./MessageBubble";
 
 interface Props {
   messages: ConversationMessage[];
+  compact?: boolean;
 }
 
 interface Lane {
@@ -15,7 +16,7 @@ interface Lane {
 }
 
 /** 泳道视图：main 一列、每个 subagent 一列，列内按时间顺序。单 lane 会话退化为单列。 */
-export default function SwimlaneView({ messages }: Props) {
+export default function SwimlaneView({ messages, compact }: Props) {
   const lanes = useMemo<Lane[]>(() => {
     const order: string[] = [];
     const labels = new Map<string, string>();
@@ -50,7 +51,7 @@ export default function SwimlaneView({ messages }: Props) {
             </div>
             <div className="space-y-5">
               {lane.messages.map((m, i) => (
-                <MessageBubble key={m.id || i} message={m} />
+                <MessageBubble key={m.id || i} message={m} compact={compact} />
               ))}
             </div>
           </div>
