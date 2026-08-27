@@ -28,15 +28,44 @@ export async function listCodexSessions(source: FileSource): Promise<ToolSession
     try {
       const stat = await source.stat(f.rel);
       const messageCount = await source.lineCount(f.rel);
+      // session_meta（首行）里带 cwd，用于按项目分组；读不到不影响列出。
+      let project: string | undefined;
+      try {
+        project = extractCodexCwd(await source.readHead(f.rel, 4096));
+      } catch {}
       sessions.push({
         id: f.name.replace(".jsonl", ""),
         title: f.name.replace(/^rollout-/, "").replace(/\.jsonl$/, "").replace(/-/g, " ").slice(0, 80),
         createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
         messageCount,
+        project,
       });
     } catch {}
   }
   return sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** 从文件头取 session_meta 的 cwd（只看首行）。 */
+function extractCodexCwd(head: string): string | undefined {
+  const firstLine = head.split("\n").find((l) => l.trim());
+  if (!firstLine) return undefined;
+  try {
+    const obj = JSON.parse(firstLine);
+    const cwd = obj?.payload?.cwd ?? obj?.cwd;
+    if (typeof cwd === "string" && cwd) return cwd;
+  } catch {
+    // meta 行内嵌 base_instructions，动辄几十 KB，readHead 截断后 JSON 不完整；
+    // cwd 位于 payload 前部，用正则从未闭合的片段里抠出来。
+    const m = firstLine.match(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (m) {
+      try {
+        return JSON.parse(`"${m[1]}"`);
+      } catch {
+        return m[1];
+      }
+    }
+  }
+  return undefined;
 }
 
 export async function readCodexSession(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
