@@ -5,7 +5,7 @@ import type { ConversationMessage, ToolCall, ToolSession } from "./types";
 
 interface HermesSessionEntry { session_id?: string; display_name?: string; created_at?: string; origin?: { chat_id?: string } }
 interface HermesMessage { role?: string; content?: unknown; tool_calls?: HermesToolCall[] }
-interface HermesToolCall { function?: { name?: string; arguments?: string }; name?: string; args?: Record<string, unknown> }
+interface HermesToolCall { id?: string; function?: { name?: string; arguments?: string }; name?: string; args?: Record<string, unknown> }
 const ROOT = ".hermes/sessions";
 // 新版 hermes 不再写 sessions.json + request dump，会话存 sqlite state.db。
 const STATE_DB = ".hermes/state.db";
@@ -94,7 +94,7 @@ async function readFromStateDb(source: FileSource, sessionId: string): Promise<C
     return await withSqliteDb(source, STATE_DB, async (db) => {
       const rows = (await db
         .prepare(
-          `SELECT role, content, tool_calls, timestamp, reasoning_content
+          `SELECT role, content, tool_calls, tool_call_id, timestamp, reasoning_content
            FROM messages WHERE session_id = ? AND active = 1 ORDER BY timestamp`
         )
         .all(sessionId)) as Record<string, unknown>[];
@@ -106,12 +106,30 @@ async function readFromStateDb(source: FileSource, sessionId: string): Promise<C
         const timestamp = row.timestamp
           ? new Date((row.timestamp as number) * 1000).toISOString()
           : new Date().toISOString();
+        // 工具结果按 tool_call_id 配回 assistant 的 toolCall，不再独立成泡。
+        if (role === "tool") {
+          const output = normalizeHermesContent(row.content);
+          let paired = false;
+          for (let j = result.length - 1; j >= 0 && !paired; j--) {
+            const calls = result[j].toolCalls;
+            if (!calls) continue;
+            for (const tc of calls) {
+              if (tc.output) continue;
+              if (row.tool_call_id && tc.id && tc.id !== row.tool_call_id) continue;
+              tc.output = output;
+              paired = true;
+              break;
+            }
+          }
+          if (paired) continue;
+        }
         let toolCalls: ToolCall[] | undefined;
         if (typeof row.tool_calls === "string" && row.tool_calls) {
           try {
             const calls = JSON.parse(row.tool_calls) as HermesToolCall[];
             if (Array.isArray(calls) && calls.length) {
               toolCalls = calls.map((tc) => ({
+                id: tc.id as string | undefined,
                 name: tc.function?.name || tc.name || "unknown",
                 input: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return tc.args || {}; } })(),
               }));

@@ -37,13 +37,15 @@ export async function readOpenCodeSession(source: FileSource, sessionId: string)
       const parsedParts: OpenCodePart[] = parts.map((p) => JSON.parse(p.data) as OpenCodePart);
       const role = msgData.role;
       let content = "";
+      let thinking = "";
       const toolCalls: ToolCall[] = [];
       for (const part of parsedParts) {
         if (part.type === "text" && part.text) content += part.text + "\n";
+        else if (part.type === "reasoning" && part.text) thinking += part.text + "\n";
         else if (part.type === "tool") toolCalls.push({ name: part.tool || "unknown", input: part.state?.input || {}, output: part.state?.output, status: part.state?.status });
       }
-      if (content || toolCalls.length) {
-        result.push({ id: msg.id, role: role as "user" | "assistant" | "system", content: content.trimEnd(), timestamp: new Date(msg.time_created).toISOString(), toolCalls: toolCalls.length ? toolCalls : undefined, source: "opencode" });
+      if (content || toolCalls.length || thinking) {
+        result.push({ id: msg.id, role: role as "user" | "assistant" | "system", content: content.trimEnd(), timestamp: new Date(msg.time_created).toISOString(), thinking: thinking.trimEnd() || undefined, toolCalls: toolCalls.length ? toolCalls : undefined, source: "opencode" });
       }
     }
     return result;

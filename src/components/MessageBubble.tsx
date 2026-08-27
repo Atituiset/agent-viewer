@@ -15,6 +15,10 @@ const SOURCE_STYLES: Record<string, { color: string; label: string }> = {
   deepseek: { color: "text-violet-400", label: "DeepSeek" },
   codex: { color: "text-green-400", label: "Codex" },
   claude: { color: "text-orange-400", label: "Claude" },
+  kimi: { color: "text-yellow-400", label: "Kimi" },
+  "kimi-code": { color: "text-yellow-400", label: "Kimi" },
+  hermes: { color: "text-zinc-300", label: "Hermes" },
+  gemini: { color: "text-cyan-400", label: "Gemini" },
 };
 
 export default function MessageBubble({ message }: Props) {
@@ -40,6 +44,11 @@ export default function MessageBubble({ message }: Props) {
           }`}>
             {isUser ? "User" : isSystem ? "System" : style.label}
           </span>
+          {message.agentLabel && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-300 border border-indigo-800/40">
+              {message.agentLabel}
+            </span>
+          )}
           <span className="text-[10px] text-zinc-600">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </span>

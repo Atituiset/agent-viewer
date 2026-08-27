@@ -47,11 +47,23 @@ export async function readDeepSeekSession(source: FileSource, sessionId: string)
       const ts = data.metadata?.created_at || new Date().toISOString();
       if (role === "user" || role === "assistant") {
         result.push({ id: `ds-${i}`, role, content, timestamp: ts, source: "deepseek" });
-      } else if (role === "tool" || msg.tool_calls) {
-        const toolCalls: ToolCall[] = (msg.tool_calls || []).map((tc: { function: { name: string; arguments: string } }) => ({
-          name: tc.function?.name || "unknown",
-          input: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return {}; } })(),
-        }));
+        // assistant 消息自带的 tool_calls 挂到刚推入的这条上
+        if (role === "assistant" && msg.tool_calls) {
+          result[result.length - 1].toolCalls = parseDeepSeekToolCalls(msg.tool_calls);
+        }
+      } else if (role === "tool") {
+        // 工具结果配回上一条 assistant 未配对的 toolCall，不再丢弃内容。
+        for (let j = result.length - 1; j >= 0; j--) {
+          const calls = result[j].toolCalls;
+          if (!calls) continue;
+          const tc = calls.find((c) => !c.output);
+          if (tc) {
+            tc.output = content;
+            break;
+          }
+        }
+      } else if (msg.tool_calls) {
+        const toolCalls = parseDeepSeekToolCalls(msg.tool_calls);
         const last = result[result.length - 1];
         if (last && last.role === "assistant") last.toolCalls = [...(last.toolCalls || []), ...toolCalls];
         else result.push({ id: `ds-tool-${i}`, role: "assistant", content: "", timestamp: ts, toolCalls, source: "deepseek" });
@@ -61,4 +73,11 @@ export async function readDeepSeekSession(source: FileSource, sessionId: string)
   } catch {
     return [];
   }
+}
+
+function parseDeepSeekToolCalls(raw: unknown): ToolCall[] {
+  return ((raw as { function: { name: string; arguments: string } }[]) || []).map((tc) => ({
+    name: tc.function?.name || "unknown",
+    input: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return {}; } })(),
+  }));
 }

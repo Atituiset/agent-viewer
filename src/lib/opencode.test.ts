@@ -15,6 +15,7 @@ function makeDb(): Buffer {
   db.prepare("INSERT INTO session VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").run("s1", "p", "T", "/d", '"deepseek-v3"', 0, 10, 20, 0, 1735689600000, 0, null);
   db.prepare("INSERT INTO message VALUES (?,?,?,?)").run("m1", "s1", JSON.stringify({ role: "user" }), 1735689600000);
   db.prepare("INSERT INTO part VALUES (?,?,?,?)").run("pt1", "m1", JSON.stringify({ id: "pt1", type: "text", text: "hi" }), 1735689600000);
+  db.prepare("INSERT INTO part VALUES (?,?,?,?)").run("pt2", "m1", JSON.stringify({ id: "pt2", type: "reasoning", text: "想了一下" }), 1735689600001);
   db.close();
   const buf = fs.readFileSync(p);
   fs.unlinkSync(p);
@@ -31,5 +32,6 @@ describe("opencode parser", () => {
     expect(sessions[0].id).toBe("s1");
     const msgs = await readOpenCodeSession(src, "s1");
     expect(msgs[0].content).toBe("hi");
+    expect(msgs[0].thinking).toBe("想了一下");
   });
 });

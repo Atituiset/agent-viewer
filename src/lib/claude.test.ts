@@ -80,11 +80,86 @@ describe("claude parser", () => {
     expect(msgs[4].content).toBe("Done.");
   });
 
+  it("merges subagent transcripts tagged with agent lane, sorted by timestamp", async () => {
+    const TASK_USE = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: { type: "tool_use", id: "task1", name: "Task", input: { description: "调研", subagent_type: "Explore" } },
+      },
+      uuid: "a-task",
+      timestamp: "2026-01-01T00:00:02Z",
+    });
+    const SUB_USER = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "调研一下" },
+      uuid: "su1",
+      timestamp: "2026-01-01T00:00:01Z",
+      isSidechain: true,
+      agentId: "aaa",
+    });
+    const SUB_ASST = JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "调研结果" }] },
+      uuid: "sa1",
+      timestamp: "2026-01-01T00:00:03Z",
+      isSidechain: true,
+      agentId: "aaa",
+    });
+
+    const src = new FakeFileSource()
+      .add(".claude/projects/-home-user-proj/s1.jsonl", [USER, TASK_USE].join("\n") + "\n")
+      .add(".claude/projects/-home-user-proj/s1/subagents/agent-aaa.jsonl", [SUB_USER, SUB_ASST].join("\n") + "\n")
+      .add(
+        ".claude/projects/-home-user-proj/s1/subagents/agent-aaa.meta.json",
+        JSON.stringify({ agentType: "Explore", description: "调研", toolUseId: "task1", spawnDepth: 1 })
+      );
+
+    const msgs = await readClaudeSession(src, "-home-user-proj", "s1");
+
+    expect(msgs.map((m) => m.id)).toEqual(["u1", "su1", "a-task", "sa1"]);
+    expect(msgs[0].agent).toBeUndefined();
+    expect(msgs[2].agent).toBeUndefined();
+    expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: "task1", name: "Task" });
+    expect(msgs[1]).toMatchObject({ agent: "aaa", agentLabel: "Explore · 调研", content: "调研一下" });
+    expect(msgs[3]).toMatchObject({ agent: "aaa", agentLabel: "Explore · 调研", content: "调研结果" });
+  });
+
+  it("falls back to agent-<id> label when meta.json is missing or malformed", async () => {
+    const SUB_USER = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "hi" },
+      uuid: "su1",
+      timestamp: "2026-01-01T00:00:01Z",
+    });
+    const src = new FakeFileSource()
+      .add(".claude/projects/-home-user-proj/s1.jsonl", [USER].join("\n") + "\n")
+      .add(".claude/projects/-home-user-proj/s1/subagents/agent-bbb.jsonl", SUB_USER + "\n")
+      .add(".claude/projects/-home-user-proj/s1/subagents/agent-bbb.meta.json", "not json{")
+      .add(".claude/projects/-home-user-proj/s1/subagents/agent-ccc.jsonl", "garbage line\n" + SUB_USER + "\n");
+
+    const msgs = await readClaudeSession(src, "-home-user-proj", "s1");
+    expect(msgs).toHaveLength(3);
+    const bbb = msgs.find((m) => m.agent === "bbb");
+    const ccc = msgs.find((m) => m.agent === "ccc");
+    expect(bbb?.agentLabel).toBe("agent-bbb");
+    expect(ccc?.agentLabel).toBe("agent-ccc");
+    expect(msgs.filter((m) => !m.agent)).toHaveLength(1);
+  });
+
   it("returns empty when root missing", async () => {
     expect(await listClaudeSessionsAll(new FakeFileSource())).toEqual([]);
   });
 
-  it("skips an unreadable project dir instead of zeroing the whole tool", async () => {
+  it("reads main session unchanged when subagents dir is absent", async () => {
+    const src = new FakeFileSource().add(
+      ".claude/projects/-home-user-proj/s1.jsonl",
+      [USER, ASST].join("\n") + "\n"
+    );
+    const msgs = await readClaudeSession(src, "-home-user-proj", "s1");
+    expect(msgs).toHaveLength(2);
+    expect(msgs.every((m) => m.agent === undefined)).toBe(true);
+  });  it("skips an unreadable project dir instead of zeroing the whole tool", async () => {
     class FlakySource extends FakeFileSource {
       async readDir(p: string) {
         if (p.includes("broken")) throw new Error("EPERM");

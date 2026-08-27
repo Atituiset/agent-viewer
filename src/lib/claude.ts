@@ -1,4 +1,4 @@
-import type { FileSource } from "../../electron/fs-source/types";
+import type { DirEntry, FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import type { ClaudeMessage, ContentBlock, ConversationMessage, ToolCall, ToolSession } from "./types";
 
@@ -62,9 +62,55 @@ export async function readClaudeSession(
   const fileRel = join(ROOT, projectPath, `${sessionId}.jsonl`);
   if (!(await source.exists(fileRel))) return [];
 
+  const messages = parseSessionFile(await source.readFile(fileRel));
+
+  // Task 工具 spawn 的 subagent 转录在 <sessionId>/subagents/agent-<id>.jsonl，
+  // 行格式与主文件相同；agentId 从文件名取，显示名从同名 .meta.json 取。
+  const subagentsDir = join(ROOT, projectPath, sessionId, "subagents");
+  if (await source.exists(subagentsDir)) {
+    let entries: DirEntry[];
+    try {
+      entries = await source.readDir(subagentsDir);
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      const match = /^agent-(.+)\.jsonl$/.exec(entry.name);
+      if (!match) continue;
+      const agentId = match[1];
+      try {
+        const agentLabel = await readAgentLabel(source, join(subagentsDir, `agent-${agentId}.meta.json`), agentId);
+        const sub = parseSessionFile(await source.readFile(join(subagentsDir, entry.name)));
+        for (const msg of sub) {
+          msg.agent = agentId;
+          msg.agentLabel = agentLabel;
+        }
+        messages.push(...sub);
+      } catch {} // 单个 subagent 文件坏了不影响主会话
+    }
+    messages.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  return messages;
+}
+
+async function readAgentLabel(source: FileSource, metaRel: string, agentId: string): Promise<string> {
+  try {
+    const meta = JSON.parse(await source.readFile(metaRel)) as { agentType?: unknown; description?: unknown };
+    const type = typeof meta.agentType === "string" ? meta.agentType : "";
+    const desc = typeof meta.description === "string" ? meta.description : "";
+    if (type && desc) return `${type} · ${desc}`;
+    if (type) return type;
+  } catch {}
+  return `agent-${agentId}`;
+}
+
+/** 解析单个 jsonl 转录文件（主会话与 subagent 转录格式一致），并配对 tool_result。 */
+function parseSessionFile(content: string): ConversationMessage[] {
   const messages: ConversationMessage[] = [];
   const toolResults: Array<{ toolUseId: string; output: string }> = [];
-  const lines = (await source.readFile(fileRel)).split("\n");
+  const lines = content.split("\n");
 
   for (const line of lines) {
     if (!line.trim()) continue;

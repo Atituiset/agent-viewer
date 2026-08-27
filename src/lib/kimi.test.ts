@@ -61,6 +61,48 @@ describe("kimi parser", () => {
     expect(msgs[3].content).toBe("好的。");
   });
 
+  it("merges subagent wires tagged by agent and sorted by timestamp", async () => {
+    const SUB_WIRE = [
+      JSON.stringify({ type: "metadata", protocol_version: "1.5", created_at: 1787754354900 }),
+      JSON.stringify({ type: "profile.bind", agentId: "agent-0", modelAlias: "kimi-code/k3", profileName: "explore", thinkingEffort: "high" }),
+      JSON.stringify({ type: "context.append_message", agentId: "agent-0", message: { role: "user", content: [{ type: "text", text: "探索一下代码" }] }, time: 1787754355200 }),
+      JSON.stringify({ type: "context.append_loop_event", agentId: "agent-0", event: { type: "content.part", part: { type: "text", text: "找到了相关文件。" } }, time: 1787754355300 }),
+    ].join("\n") + "\n";
+    const src = new FakeFileSource()
+      .add(`${BASE}/state.json`, STATE)
+      .add(`${BASE}/agents/main/wire.jsonl`, WIRE)
+      .add(`${BASE}/agents/agent-0/wire.jsonl`, SUB_WIRE);
+    const msgs = await readKimiSession(src, SESS);
+    // 按 timestamp 升序合并：agent-0 的 user/assistant 插在 main 第 2 个 user 之前。
+    expect(msgs.map((m) => [m.role, m.agent ?? "main"])).toEqual([
+      ["user", "main"],
+      ["assistant", "main"],
+      ["user", "agent-0"],
+      ["assistant", "agent-0"],
+      ["user", "main"],
+      ["assistant", "main"],
+    ]);
+    expect(msgs.map((m) => m.timestamp)).toEqual([...msgs.map((m) => m.timestamp)].sort());
+    const sub = msgs.filter((m) => m.agent === "agent-0");
+    expect(sub).toHaveLength(2);
+    for (const m of sub) expect(m.agentLabel).toBe("explore · agent-0");
+    expect(sub[0].content).toBe("探索一下代码");
+    expect(sub[1].content).toBe("找到了相关文件。");
+    const mainMsgs = msgs.filter((m) => !m.agent);
+    expect(mainMsgs).toHaveLength(4);
+    for (const m of mainMsgs) expect(m.agentLabel).toBeUndefined();
+  });
+
+  it("skips unreadable subagent wires but keeps main", async () => {
+    // agent-0 目录存在但 wire.jsonl 内容无法解析出消息，不影响 main。
+    const src = new FakeFileSource()
+      .add(`${BASE}/state.json`, STATE)
+      .add(`${BASE}/agents/main/wire.jsonl`, WIRE)
+      .add(`${BASE}/agents/agent-0/wire.jsonl`, "not json\n{}\n");
+    const msgs = await readKimiSession(src, SESS);
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  });
+
   it("returns empty when root missing", async () => {
     expect(await listKimiSessions(new FakeFileSource())).toEqual([]);
     expect(await readKimiSession(new FakeFileSource(), SESS)).toEqual([]);

@@ -135,6 +135,10 @@ export interface ConversationMessage {
   thinking?: string;
   toolCalls?: ToolCall[];
   source: string;
+  /** 泳道 id：subagent 消息为其 agent id，缺省视为 "main"。 */
+  agent?: string;
+  /** 泳道显示名（如 "Explore · 分析工具链"）。 */
+  agentLabel?: string;
 }
 
 export interface ToolCall {

@@ -37,6 +37,9 @@ describe("hermes parser", () => {
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(msgs[1].thinking).toBe("thinking...");
     expect(msgs[1].toolCalls?.[0].name).toBe("Read");
+    // role:"tool" 的消息配回 toolCall.output，不独立成泡
+    expect(msgs[1].toolCalls?.[0].id).toBe("call_1");
+    expect(msgs[1].toolCalls?.[0].output).toBe("file contents");
   });
 });
 
@@ -44,10 +47,11 @@ function makeStateDb(): Buffer {
   const p = path.join(os.tmpdir(), `av_hermes_${Math.random().toString(36).slice(2)}.db`);
   const db = new Database(p);
   db.exec(`CREATE TABLE sessions(id TEXT, title TEXT, display_name TEXT, started_at REAL, message_count INTEGER, cwd TEXT, model TEXT, archived INTEGER, hidden INTEGER);
-           CREATE TABLE messages(id INTEGER, session_id TEXT, role TEXT, content TEXT, tool_calls TEXT, timestamp REAL, reasoning_content TEXT, active INTEGER);`);
+           CREATE TABLE messages(id INTEGER, session_id TEXT, role TEXT, content TEXT, tool_calls TEXT, tool_call_id TEXT, timestamp REAL, reasoning_content TEXT, active INTEGER);`);
   db.prepare("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?)").run("20260602_233910_562888", null, "My Session", 1780414886.4, 2, "/home/u/proj", "glm5", 0, 0);
-  db.prepare("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)").run(1, "20260602_233910_562888", "user", "hello", null, 1780414888.5, null, 1);
-  db.prepare("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)").run(2, "20260602_233910_562888", "assistant", "hi", JSON.stringify([{ function: { name: "Read", arguments: "{}" } }]), 1780414890.5, "thinking...", 1);
+  db.prepare("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)").run(1, "20260602_233910_562888", "user", "hello", null, null, 1780414888.5, null, 1);
+  db.prepare("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)").run(2, "20260602_233910_562888", "assistant", "hi", JSON.stringify([{ id: "call_1", function: { name: "Read", arguments: "{}" } }]), null, 1780414890.5, "thinking...", 1);
+  db.prepare("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)").run(3, "20260602_233910_562888", "tool", "file contents", null, "call_1", 1780414891.5, null, 1);
   db.close();
   const buf = fs.readFileSync(p);
   fs.unlinkSync(p);

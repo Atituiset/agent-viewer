@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import type { ConversationMessage, ToolSession, DetectedTool } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
+import SwimlaneView from "./SwimlaneView";
 
 interface Props {
   messages: ConversationMessage[];
@@ -15,6 +16,7 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"waterfall" | "swimlane">("waterfall");
 
   const filtered = useMemo(() => {
     if (!search) return messages;
@@ -61,31 +63,51 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
       )}
 
       <div className="flex-shrink-0 px-6 py-2 border-b border-[var(--sidebar-border)] bg-zinc-900/20">
-        <div className="max-w-5xl mx-auto relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter messages by content, role, tool..."
-            className="w-full bg-zinc-800/40 border border-zinc-700/30 rounded-lg pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-          />
-          {search && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              <span className="text-[11px] text-zinc-500">{filtered.length}/{messages.length}</span>
+        <div className="max-w-5xl mx-auto flex items-center gap-3">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter messages by content, role, tool..."
+              className="w-full bg-zinc-800/40 border border-zinc-700/30 rounded-lg pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+            />
+            {search && (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <span className="text-[11px] text-zinc-500">{filtered.length}/{messages.length}</span>
+                <button
+                  onClick={() => setSearch("")}
+                  className="text-zinc-600 hover:text-zinc-400 text-xs"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-1 flex-shrink-0">
+            {(["waterfall", "swimlane"] as const).map((mode) => (
               <button
-                onClick={() => setSearch("")}
-                className="text-zinc-600 hover:text-zinc-400 text-xs"
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`text-[11px] px-2.5 py-1.5 rounded-md border transition-colors font-medium ${
+                  viewMode === mode
+                    ? "border-blue-600 text-blue-400 bg-blue-900/20"
+                    : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
+                }`}
               >
-                Clear
+                {mode === "waterfall" ? "瀑布" : "泳道"}
               </button>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
       </div>
 
+      {viewMode === "swimlane" ? (
+        <SwimlaneView messages={filtered} />
+      ) : (
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-8">
         <div className="max-w-5xl mx-auto space-y-5">
           {error && (
@@ -103,6 +125,7 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
