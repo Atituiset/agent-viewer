@@ -165,6 +165,62 @@ const ROLE_STYLE: Record<string, { label: string; ring: string }> = {
   tool: { label: "Tool", ring: "border-amber-900/30" },
 };
 
+/** 工具调用分类：MCP（mcp__server__tool 前缀）、Skill、内置工具（Bash/Read/...）。 */
+function toolKind(name: string): { kind: "mcp" | "skill" | "builtin"; display: string } {
+  if (name.startsWith("mcp__")) {
+    const [, server, tool] = name.split("__");
+    return { kind: "mcp", display: tool ? `${server}/${tool}` : name };
+  }
+  if (name === "Skill") return { kind: "skill", display: name };
+  return { kind: "builtin", display: name };
+}
+
+const KIND_STYLE = {
+  mcp: "bg-purple-900/40 text-purple-300 border-purple-800/40",
+  skill: "bg-blue-900/40 text-blue-300 border-blue-800/40",
+  builtin: "bg-amber-900/30 text-amber-300 border-amber-800/30",
+} as const;
+
+/** 从 input 里挑最有信息量的参数做一行摘要。 */
+function toolArgSummary(input: Record<string, unknown>): string {
+  const KEYS = ["cmd", "command", "path", "file_path", "pattern", "query", "description", "prompt", "skill", "url", "name"];
+  for (const k of KEYS) {
+    const v = input[k];
+    if (typeof v === "string" && v) {
+      const oneLine = v.replace(/\s+/g, " ").trim();
+      return oneLine.length > 80 ? oneLine.slice(0, 80) + "…" : oneLine;
+    }
+  }
+  const json = JSON.stringify(input);
+  return json.length > 80 ? json.slice(0, 80) + "…" : json;
+}
+
+function ToolCallRows({ toolCalls }: { toolCalls: NonNullable<ConversationMessage["toolCalls"]> }) {
+  return (
+    <div className="mt-2 space-y-1">
+      {toolCalls.map((tc, i) => {
+        const { kind, display } = toolKind(tc.name);
+        return (
+          <div key={`${tc.name}-${i}`} className="flex items-center gap-1.5 text-[11px] font-mono min-w-0">
+            <span className={`flex-shrink-0 px-1.5 py-0.5 rounded border ${KIND_STYLE[kind]}`}>
+              {kind === "mcp" ? "MCP" : display}
+            </span>
+            {kind === "mcp" && <span className="flex-shrink-0 text-purple-300/80">{display}</span>}
+            {kind === "skill" && tc.input ? (
+              <span className="flex-shrink-0 text-blue-300/80">{String((tc.input as Record<string, unknown>).skill ?? "")}</span>
+            ) : (
+              <span className="text-zinc-500 truncate">{tc.input ? toolArgSummary(tc.input) : ""}</span>
+            )}
+            <span className={`flex-shrink-0 ml-auto ${tc.output ? "text-green-600" : "text-zinc-700"}`}>
+              {tc.output ? "✓" : "…"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolean }) {
   const [xContent, setXContent] = useState(false);
   const [xThink, setXThink] = useState(false);
@@ -226,9 +282,7 @@ function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolea
 
       {msg.toolCalls && msg.toolCalls.length > 0 && (
         compact ? (
-          <div className="mt-2 text-[11px] font-mono text-amber-400/90">
-            ⚙ {msg.toolCalls.map((t) => t.name).join(", ")}
-          </div>
+          <ToolCallRows toolCalls={msg.toolCalls} />
         ) : (
           msg.toolCalls.map((tool, i) => <ToolCallBlock key={`${tool.name}-${i}`} tool={tool} />)
         )
