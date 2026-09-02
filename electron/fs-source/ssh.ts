@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import type { FileSource, DirEntry, FileStat } from "./types";
 import { resolvePath } from "./util";
+import { verifyHostKey } from "./host-keys";
 
 export interface SshOptions {
   host: string;
@@ -96,6 +97,10 @@ export class SshFileSource implements FileSource {
       username: this.opts.username,
       password: this.opts.password,
       privateKey: resolvePrivateKey(this.opts.privateKey),
+      // 主机密钥校验（TOFU）：ssh2 默认接受任意主机密钥，密码/私钥认证对 MITM 敞开。
+      // 首次连接记录 sha256 指纹，之后指纹不一致直接拒绝。
+      hostHash: "sha256",
+      hostVerifier: (hashedKey: string) => verifyHostKey(this.opts.host, this.opts.port, hashedKey),
       // 有 ssh-agent 时让它参与认证（排在 publickey/password 前后由 ssh2 决定），
       // 这样「任何能 ssh 上去的 Linux 机器」零配置即可探测。
       agent: process.env.SSH_AUTH_SOCK || undefined,

@@ -29,6 +29,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
   const [showAddMachine, setShowAddMachine] = useState(false);
+  // 机器操作（添加/删除）失败可见化，不再静默吞掉。
+  const [machinesError, setMachinesError] = useState<string | null>(null);
+  const [addMachineError, setAddMachineError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -69,11 +72,16 @@ export default function Home() {
     setSessionsError(null);
     try {
       const r = await window.api.sessions.list(selectedMachine.id, tool.id);
-      if (r.error) setSessionsError(r.error);
-      else setSessions(r.data || []);
+      if (r.error) {
+        setSessionsError(r.error);
+        setSessions([]); // 出错时清空旧列表，避免错误 banner 与过期数据并排显示
+      } else {
+        setSessions(r.data || []);
+      }
       setView("sessions");
     } catch (e) {
       setSessionsError(String(e));
+      setSessions([]);
       setView("sessions");
     }
     setLoading(false);
@@ -141,16 +149,30 @@ export default function Home() {
   const handleAddMachine = useCallback(async (m: { name: string; host: string; user: string; port: number; authMethod: "sshKey" | "password"; sshKey?: string; password?: string }) => {
     try {
       const r = await window.api.machines.add({ ...m, type: "ssh" });
+      if (r.error) {
+        setAddMachineError(r.error); // 弹窗保持打开，错误显示在弹窗内
+        return;
+      }
       if (r.data) setMachines((prev) => [...prev, r.data!]);
-    } catch {}
-    setShowAddMachine(false);
+      setAddMachineError(null);
+      setShowAddMachine(false);
+    } catch (e) {
+      setAddMachineError(String(e));
+    }
   }, []);
 
   const handleRemoveMachine = useCallback(async (id: string) => {
+    setMachinesError(null);
     try {
-      await window.api.machines.remove(id);
+      const r = await window.api.machines.remove(id);
+      if (r && r.error) {
+        setMachinesError(r.error);
+        return;
+      }
       setMachines((prev) => prev.filter((m) => m.id !== id));
-    } catch {}
+    } catch (e) {
+      setMachinesError(String(e));
+    }
   }, []);
 
   const breadcrumb = [
@@ -199,7 +221,7 @@ export default function Home() {
         )}
         {view === "machines" && (
           <button
-            onClick={() => setShowAddMachine(true)}
+            onClick={() => { setAddMachineError(null); setShowAddMachine(true); }}
             className="ml-auto text-xs px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
           >
             + Add Machine
@@ -214,7 +236,14 @@ export default function Home() {
             Loading...
           </div>
         ) : view === "machines" ? (
-          <MachineCards machines={machines} onSelect={loadTools} onRemove={handleRemoveMachine} />
+          <div className="h-full overflow-y-auto">
+            {machinesError && (
+              <div className="mx-6 mt-4 px-4 py-2.5 rounded-lg border border-red-800/60 bg-red-900/20 text-red-300 text-sm">
+                {machinesError}
+              </div>
+            )}
+            <MachineCards machines={machines} onSelect={loadTools} onRemove={handleRemoveMachine} />
+          </div>
         ) : view === "tools" ? (
           <ToolCards tools={tools} machine={selectedMachine!} onSelect={loadSessions} error={toolsError} />
         ) : view === "sessions" ? (
@@ -225,7 +254,7 @@ export default function Home() {
       </div>
 
       {showAddMachine && (
-        <AddMachineModal onAdd={handleAddMachine} onClose={() => setShowAddMachine(false)} />
+        <AddMachineModal error={addMachineError} onAdd={handleAddMachine} onClose={() => setShowAddMachine(false)} />
       )}
     </div>
   );

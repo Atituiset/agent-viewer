@@ -25,9 +25,27 @@ function createWindow() {
     win.loadFile(path.join(app.getAppPath(), "out", "index.html"));
   }
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: "deny" };
   });
+  // 安全红线：会话内容是「不可信输入」（agent transcript 里可嵌入任意链接），
+  // 绝不允许把整个窗口导航走——导航后的页面会继承 window.api（SSH/凭据能力全在主进程后面）。
+  // 应用自身的页面跳转放行（dev 走 localhost，生产是 file://），其余交给系统浏览器。
+  win.webContents.on("will-navigate", (event, url) => {
+    const internal =
+      process.env.AGENT_VIEWER_DEV === "1" ? url.startsWith("http://localhost:3000") : url.startsWith("file://");
+    if (!internal) {
+      event.preventDefault();
+      openExternalSafe(url);
+    }
+  });
+}
+
+/** 只允许 http(s)/mailto 进系统浏览器，挡住 file://、自定义 scheme 等协议级利用。 */
+function openExternalSafe(url: string) {
+  if (/^https?:\/\//i.test(url) || url.startsWith("mailto:")) {
+    shell.openExternal(url);
+  }
 }
 
 app.whenReady().then(async () => {

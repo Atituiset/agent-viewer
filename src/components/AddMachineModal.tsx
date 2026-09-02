@@ -3,11 +3,13 @@
 import { useState } from "react";
 
 interface Props {
+  /** 添加失败时显示的错误（保持弹窗打开）。 */
+  error?: string | null;
   onAdd: (machine: { name: string; host: string; user: string; port: number; authMethod: "sshKey" | "password"; sshKey?: string; password?: string }) => void;
   onClose: () => void;
 }
 
-export default function AddMachineModal({ onAdd, onClose }: Props) {
+export default function AddMachineModal({ error, onAdd, onClose }: Props) {
   const [name, setName] = useState("");
   const [host, setHost] = useState("");
   const [user, setUser] = useState("");
@@ -129,6 +131,14 @@ export default function AddMachineModal({ onAdd, onClose }: Props) {
                 placeholder="Enter password"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
               />
+              <p className="text-[11px] text-zinc-600 mt-1">
+                Encrypted with your OS keychain when available; otherwise stored in plaintext. Prefer SSH keys.
+              </p>
+            </div>
+          )}
+          {error && (
+            <div className="px-3 py-2 rounded-lg border border-red-800/60 bg-red-900/20 text-red-300 text-xs break-words">
+              {error}
             </div>
           )}
           <div className="flex justify-end gap-3 pt-2">

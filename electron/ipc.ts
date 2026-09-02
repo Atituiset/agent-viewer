@@ -19,6 +19,15 @@ function machineById(id: string): MachineConfig {
 }
 
 /**
+ * 下发给渲染进程的机器信息剥掉明文凭据（password）。
+ * 渲染层从不需要它——所有 SSH 连接都发生在主进程；
+ * 不把明文密码塞进 React state，缩小 XSS 发生后的爆炸半径。
+ */
+function publicMachine(m: MachineConfig): MachineConfig {
+  return { ...m, password: undefined };
+}
+
+/**
  * 会话文件的轻量指纹（mtime+size），LIVE 轮询先比对它，变了才重读全文。
  * 返回 null 表示无法定位文件（如 sqlite 存储的 opencode）——调用方回退为直接刷新。
  */
@@ -111,7 +120,7 @@ async function locateSource(
 }
 
 export function registerIpc() {
-  ipcMain.handle("machines:list", () => ok(loadMachines()));
+  ipcMain.handle("machines:list", () => ok(loadMachines().map(publicMachine)));
   ipcMain.handle("machines:add", (_e, cfg) => {
     try {
       if (
@@ -122,7 +131,7 @@ export function registerIpc() {
       ) {
         return err(new Error("invalid machine config"));
       }
-      return ok(addMachine(cfg));
+      return ok(publicMachine(addMachine(cfg)));
     } catch (e) {
       return err(e);
     }
