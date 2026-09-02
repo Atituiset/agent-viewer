@@ -1,9 +1,30 @@
 {
   "name": "agent-viewer",
   "version": "0.2.3",
-  "private": true,
-  "description": "Local & remote agent session viewer (Claude Code / Codex / OpenCode / Gemini / DeepSeek / Hermes)",
-  "author": "Atituiset <atituiset@example.com>",
+  "description": "Local & remote AI agent session viewer (Claude Code / Codex / OpenCode / Gemini / DeepSeek / Hermes / Kimi) — SSH & WSL aware",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "opencode",
+    "gemini-cli",
+    "deepseek",
+    "kimi",
+    "ai-agents",
+    "session-viewer",
+    "transcript-viewer",
+    "electron",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "author": "Atituiset (https://github.com/Atituiset)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Atituiset/agent-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Atituiset/agent-viewer/issues"
+  },
+  "homepage": "https://github.com/Atituiset/agent-viewer#readme",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "next dev",

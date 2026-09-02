@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agent Viewer
 
-## Getting Started
+**One window for every AI coding agent session — local and remote.**
 
-First, run the development server:
+Browse, search and follow the session transcripts of all your AI coding agents, across every machine you SSH into. No cloud, no uploads: everything is read from the agents' own storage, on the machines where it lives.
+
+[![CI](https://github.com/Atituiset/agent-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/Atituiset/agent-viewer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Atituiset/agent-viewer)](https://github.com/Atituiset/agent-viewer/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## Why
+
+AI coding agents accumulate sessions in `~/.claude`, `~/.codex`, sqlite databases and assorted JSONL files — spread across your laptop, dev servers and WSL instances. When you want to check *"what did the agent actually do?"*, you're stuck reading raw JSONL. Agent Viewer turns all of it into:
+
+- **A unified session browser** — sessions from every detected agent on every configured machine, newest first, with title, project, model, token and cost metadata.
+- **A conversation view** — messages, thinking blocks and tool calls rendered as readable chat with syntax-highlighted markdown.
+- **A swimlane view** — the session as an interaction sequence diagram, including sub-agents in their own lanes.
+- **Live mode** — watch a session update in real time while the agent is still working.
+
+## Supported agents
+
+| Agent | Storage | Format |
+|---|---|---|
+| Claude Code | `~/.claude/projects` | JSONL |
+| Codex | `~/.codex/sessions` | JSONL |
+| OpenCode | `~/.local/share/opencode/opencode.db` | SQLite |
+| Gemini CLI | `~/.gemini/antigravity-cli` | JSONL |
+| DeepSeek | `~/.deepseek/sessions` | JSON |
+| Hermes | `~/.hermes/sessions` | JSONL |
+| Kimi Code | `~/.kimi-code/sessions` | JSONL |
+
+Adding a new agent is two steps: write `src/lib/<tool>.ts` (list/read), then add one entry to the registry (`src/lib/registry.ts`).
+
+## Machines
+
+- **Local** — works out of the box.
+- **SSH** — add any Linux machine (host, user, SSH key or password). Detection, listing and streaming all happen over SSH; session data is read on demand, never synced or copied to a central store.
+- **WSL** — on Windows, WSL instances are treated as first-class filesystems.
+
+Passwords are encrypted with the OS keychain (Electron `safeStorage`); SSH host keys are verified trust-on-first-use (TOFU).
+
+## Download
+
+Prebuilt installers are on the [Releases](https://github.com/Atituiset/agent-viewer/releases/latest) page:
+
+| Platform | Artifacts |
+|---|---|
+| Windows | `Agent Viewer Setup x.y.z.exe` (NSIS) |
+| macOS | `.dmg` / `.zip` |
+| Linux | `.AppImage` / `.deb` |
+
+> Windows/macOS builds are currently unsigned, so SmartScreen/Gatekeeper will warn on first launch. Signed & notarized builds are on the roadmap.
+
+## Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run rebuild        # build better-sqlite3 against Electron's ABI
+npm run dev            # terminal 1: Next.js dev server
+npm run electron:dev   # terminal 2: Electron shell
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Useful scripts:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm test               # vitest (parsers, file sources, registry)
+npm run lint
+npm run smoke          # main-process smoke test (native module + boot)
+npm run dist           # build installers with electron-builder
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Privacy
 
-## Learn More
+Agent Viewer is a read-only viewer. It never modifies agent session files, never sends data anywhere, and has no telemetry. The only files it writes are its own config (`~/.config/agent-viewer/`) and temporary files for remote SQLite reads, which are deleted after use.
 
-To learn more about Next.js, take a look at the following resources:
+## Contributing
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Issues and pull requests are welcome. Bug reports are most useful when they include (a redacted excerpt of) the session file that fails to parse.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## License
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+[MIT](LICENSE)

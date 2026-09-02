@@ -50,3 +50,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agent/editor local configs (never commit personal tool settings)
+.claude/
+.cursor/
+.idea/
+.vscode/
