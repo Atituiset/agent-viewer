@@ -16,6 +16,7 @@ AI coding agents accumulate sessions in `~/.claude`, `~/.codex`, sqlite database
 - **A conversation view** — messages, thinking blocks and tool calls rendered as readable chat with syntax-highlighted markdown.
 - **A swimlane view** — the session as an interaction sequence diagram, including sub-agents in their own lanes.
 - **Live mode** — watch a session update in real time while the agent is still working.
+- **English & Chinese UI** — auto-detected from the system language, toggleable in the nav bar.
 
 ## Supported agents
 

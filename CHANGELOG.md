@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- i18n: all UI strings centralized in `src/components/i18n.ts` with English and
+  Chinese dictionaries; language toggle in the nav bar (persisted).
+- Component test infrastructure (@testing-library + jsdom) with tests for
+  MachineCards, AddMachineModal and MessageBubble.
+
+### Changed
+
+- Swimlane view is virtualized: node positions are computed from lane geometry
+  and the virtualizer instead of measuring every node with
+  `getBoundingClientRect`; large sessions no longer mount the whole graph.
+- Accessibility: cards are keyboard-focusable buttons, the add-machine dialog
+  is a proper `role="dialog"` (Esc closes, focus trap on open, labelled
+  fields, radios use `role="radio"`).
+
 ### Fixed
 
 - SSH command failures (non-zero exit, e.g. `test -e` misses during detection)

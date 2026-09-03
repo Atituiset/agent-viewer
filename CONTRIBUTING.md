@@ -47,7 +47,12 @@ Parser ground rules:
 ## Style
 
 - TypeScript strict; no `any`, no `ts-ignore`. Commentary in Chinese or English is
-  fine (the codebase mixes both), but error strings and UI copy are English.
+  fine (the codebase mixes both).
+- **All UI copy goes through `src/components/i18n.ts`** — add your string to both
+  the `en` and `zh` dictionaries, never hardcode text in components. The
+  `i18n.test.ts` placeholder-parity check will catch mismatches.
+- Component tests use @testing-library with jsdom; test files in
+  `src/components/*.test.tsx` start with `// @vitest-environment jsdom`.
 - Conventional commits (`feat(parser): …`, `fix(ssh): …`).
 - Keep diffs minimal and focused; unrelated refactors go in separate PRs.
 

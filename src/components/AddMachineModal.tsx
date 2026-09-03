@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useT } from "@/components/i18n";
 
 interface Props {
   /** 添加失败时显示的错误（保持弹窗打开）。 */
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function AddMachineModal({ error, onAdd, onClose }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [host, setHost] = useState("");
   const [user, setUser] = useState("");
@@ -17,6 +19,24 @@ export default function AddMachineModal({ error, onAdd, onClose }: Props) {
   const [authMethod, setAuthMethod] = useState<"sshKey" | "password">("sshKey");
   const [sshKey, setSshKey] = useState("");
   const [password, setPassword] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // a11y: 打开时聚焦第一个输入框；Esc 关闭；关闭后焦点归还给触发者。
+  useEffect(() => {
+    const prevActive = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      prevActive?.focus();
+    };
+  }, [onClose]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,62 +52,79 @@ export default function AddMachineModal({ error, onAdd, onClose }: Props) {
     });
   };
 
+  const field =
+    "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500";
+  const labelCls = "text-xs text-zinc-500 block mb-1";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-machine-title"
         className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold text-zinc-200 mb-4">Add Remote Machine</h2>
+        <h2 id="add-machine-title" className="text-lg font-semibold text-zinc-200 mb-4">
+          {t("add.title")}
+        </h2>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">Name</label>
+            <label htmlFor="am-name" className={labelCls}>{t("add.name")}</label>
             <input
+              id="am-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="my-server"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+              className={field}
             />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
-              <label className="text-xs text-zinc-500 block mb-1">Host</label>
+              <label htmlFor="am-host" className={labelCls}>{t("add.host")}</label>
               <input
+                id="am-host"
                 type="text"
                 value={host}
                 onChange={(e) => setHost(e.target.value)}
                 placeholder="192.168.1.100"
                 required
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+                className={field}
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">Port</label>
+              <label htmlFor="am-port" className={labelCls}>{t("add.port")}</label>
               <input
+                id="am-port"
                 type="text"
+                inputMode="numeric"
                 value={port}
                 onChange={(e) => setPort(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+                className={field}
               />
             </div>
           </div>
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">User</label>
+            <label htmlFor="am-user" className={labelCls}>{t("add.user")}</label>
             <input
+              id="am-user"
               type="text"
               value={user}
               onChange={(e) => setUser(e.target.value)}
               placeholder="ubuntu"
               required
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+              className={field}
             />
           </div>
           <div>
-            <label className="text-xs text-zinc-500 block mb-1.5">Authentication Method</label>
-            <div className="flex gap-2">
+            <span className={`${labelCls} mb-1.5`}>{t("add.auth")}</span>
+            <div className="flex gap-2" role="radiogroup" aria-label={t("add.auth")}>
               <button
                 type="button"
+                role="radio"
+                aria-checked={authMethod === "sshKey"}
                 onClick={() => setAuthMethod("sshKey")}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${
                   authMethod === "sshKey"
@@ -99,6 +136,8 @@ export default function AddMachineModal({ error, onAdd, onClose }: Props) {
               </button>
               <button
                 type="button"
+                role="radio"
+                aria-checked={authMethod === "password"}
                 onClick={() => setAuthMethod("password")}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${
                   authMethod === "password"
@@ -112,32 +151,32 @@ export default function AddMachineModal({ error, onAdd, onClose }: Props) {
           </div>
           {authMethod === "sshKey" ? (
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">SSH Key Path</label>
+              <label htmlFor="am-sshkey" className={labelCls}>{t("add.keyPath")}</label>
               <input
+                id="am-sshkey"
                 type="text"
                 value={sshKey}
                 onChange={(e) => setSshKey(e.target.value)}
                 placeholder="~/.ssh/id_rsa"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+                className={field}
               />
             </div>
           ) : (
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">Password</label>
+              <label htmlFor="am-password" className={labelCls}>{t("add.password")}</label>
               <input
+                id="am-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+                placeholder={t("add.passwordPlaceholder")}
+                className={field}
               />
-              <p className="text-[11px] text-zinc-600 mt-1">
-                Encrypted with your OS keychain when available; otherwise stored in plaintext. Prefer SSH keys.
-              </p>
+              <p className="text-[11px] text-zinc-600 mt-1">{t("add.passwordHint")}</p>
             </div>
           )}
           {error && (
-            <div className="px-3 py-2 rounded-lg border border-red-800/60 bg-red-900/20 text-red-300 text-xs break-words">
+            <div role="alert" className="px-3 py-2 rounded-lg border border-red-800/60 bg-red-900/20 text-red-300 text-xs break-words">
               {error}
             </div>
           )}
@@ -147,13 +186,13 @@ export default function AddMachineModal({ error, onAdd, onClose }: Props) {
               onClick={onClose}
               className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
             >
-              Cancel
+              {t("add.cancel")}
             </button>
             <button
               type="submit"
               className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
             >
-              Add Machine
+              {t("add.submit")}
             </button>
           </div>
         </form>

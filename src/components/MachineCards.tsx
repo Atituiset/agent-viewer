@@ -1,6 +1,7 @@
 "use client";
 
 import type { MachineConfig } from "@/lib/types";
+import { useT } from "@/components/i18n";
 
 interface Props {
   machines: MachineConfig[];
@@ -9,13 +10,14 @@ interface Props {
 }
 
 export default function MachineCards({ machines, onSelect, onRemove }: Props) {
+  const t = useT();
   if (machines.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-zinc-600">
         <div className="text-center">
           <div className="text-5xl mb-4">🖥️</div>
-          <h2 className="text-lg font-medium text-zinc-400">No Machines</h2>
-          <p className="text-sm mt-2">Add a machine via SSH or open this app locally.</p>
+          <h2 className="text-lg font-medium text-zinc-400">{t("machines.empty.title")}</h2>
+          <p className="text-sm mt-2">{t("machines.empty.body")}</p>
         </div>
       </div>
     );
@@ -24,14 +26,23 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-8">
       <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-zinc-100 mb-1">Machines</h1>
-        <p className="text-sm text-zinc-500 mb-8">Select a machine to browse its agent sessions.</p>
+        <h1 className="text-2xl font-bold text-zinc-100 mb-1">{t("machines.title")}</h1>
+        <p className="text-sm text-zinc-500 mb-8">{t("machines.subtitle")}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {machines.map((m) => (
             <div
               key={m.id}
-              className="group relative rounded-xl border border-[var(--sidebar-border)] bg-zinc-900/60 hover:bg-zinc-900/90 hover:border-zinc-600 transition-all cursor-pointer overflow-hidden"
+              role="button"
+              tabIndex={0}
+              aria-label={`${m.name} (${m.user}@${m.host}:${m.port})`}
+              className="group relative rounded-xl border border-[var(--sidebar-border)] bg-zinc-900/60 hover:bg-zinc-900/90 hover:border-zinc-600 transition-all cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onSelect(m)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(m);
+                }
+              }}
             >
               <div className="p-5">
                 <div className="flex items-start justify-between mb-3">
@@ -44,7 +55,7 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
                     <div>
                       <h3 className="text-base font-semibold text-zinc-200">{m.name}</h3>
                       <p className="text-xs text-zinc-500 mt-0.5">
-                        {m.type === "local" ? "Local machine" : `${m.user}@${m.host}:${m.port}`}
+                        {m.type === "local" ? t("machines.local") : `${m.user}@${m.host}:${m.port}`}
                       </p>
                     </div>
                   </div>
@@ -59,7 +70,7 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
                   {m.auto && (
                     <span
                       className="px-2 py-0.5 rounded bg-zinc-800/50 text-zinc-500 tracking-wider font-medium"
-                      title="Discovered from ~/.ssh/config"
+                      title={t("machines.autoHint")}
                     >
                       auto
                     </span>
@@ -70,8 +81,9 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
               {m.type !== "local" && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onRemove(m.id); }}
-                  className="absolute top-3 right-3 text-zinc-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 text-sm"
-                  title="Remove machine"
+                  className="absolute top-3 right-3 text-zinc-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-sm"
+                  title={t("machines.remove")}
+                  aria-label={t("machines.remove")}
                 >
                   ✕
                 </button>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { MachineConfig, DetectedTool, ConversationMessage, ToolSession } from "@/lib/types";
+import { useT, getLocale, setLocale } from "@/components/i18n";
 import MachineCards from "@/components/MachineCards";
 import ToolCards from "@/components/ToolCards";
 import SessionList from "@/components/SessionList";
@@ -11,6 +12,7 @@ import AddMachineModal from "@/components/AddMachineModal";
 type View = "machines" | "tools" | "sessions" | "conversation";
 
 export default function Home() {
+  const t = useT();
   const [view, setView] = useState<View>("machines");
   const [machines, setMachines] = useState<MachineConfig[]>([]);
   const [selectedMachine, setSelectedMachine] = useState<MachineConfig | null>(null);
@@ -183,7 +185,7 @@ export default function Home() {
   }, []);
 
   const breadcrumb = [
-    { label: "Machines", onClick: () => setView("machines") },
+    { label: t("nav.machines"), onClick: () => setView("machines") },
     ...(selectedMachine ? [{ label: selectedMachine.name, onClick: () => setView("tools") }] : []),
     ...(selectedTool ? [{ label: selectedTool.name, onClick: () => setView("sessions") }] : []),
     ...(selectedSession ? [{ label: selectedSession.title, onClick: () => {} }] : []),
@@ -191,7 +193,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-full">
-      <nav className="flex-shrink-0 border-b border-[var(--sidebar-border)] px-6 py-3 flex items-center gap-2 bg-[var(--sidebar-bg)]">
+      <nav aria-label="Breadcrumb" className="flex-shrink-0 border-b border-[var(--sidebar-border)] px-6 py-3 flex items-center gap-2 bg-[var(--sidebar-bg)]">
         <div className="flex items-center gap-1 text-sm">
           {breadcrumb.map((item, i) => (
             <span key={i} className="flex items-center gap-1">
@@ -206,41 +208,53 @@ export default function Home() {
             </span>
           ))}
         </div>
-        {view === "conversation" && (
-          <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          {view === "conversation" && (
+            <>
+              <button
+                onClick={() => setLiveMode(!liveMode)}
+                aria-pressed={liveMode}
+                className={`text-[11px] px-3 py-1.5 rounded-md border transition-colors font-medium ${
+                  liveMode
+                    ? "border-green-600 text-green-400 bg-green-900/20"
+                    : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {liveMode ? "● LIVE" : "○ LIVE"}
+              </button>
+              <button
+                onClick={() => refreshSession(true)}
+                title={t("nav.refresh")}
+                aria-label={t("nav.refresh")}
+                className="text-sm px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                ↻
+              </button>
+            </>
+          )}
+          {view === "machines" && (
             <button
-              onClick={() => setLiveMode(!liveMode)}
-              className={`text-[11px] px-3 py-1.5 rounded-md border transition-colors font-medium ${
-                liveMode
-                  ? "border-green-600 text-green-400 bg-green-900/20"
-                  : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
-              }`}
+              onClick={() => { setAddMachineError(null); setShowAddMachine(true); }}
+              className="text-xs px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
             >
-              {liveMode ? "● LIVE" : "○ LIVE"}
+              {t("nav.addMachine")}
             </button>
-            <button
-              onClick={() => refreshSession(true)}
-              className="text-sm px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              ↻
-            </button>
-          </div>
-        )}
-        {view === "machines" && (
+          )}
           <button
-            onClick={() => { setAddMachineError(null); setShowAddMachine(true); }}
-            className="ml-auto text-xs px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
+            onClick={() => setLocale(getLocale() === "zh" ? "en" : "zh")}
+            title={t("lang.label")}
+            className="text-[11px] px-2 py-1.5 rounded-md border border-zinc-800 text-zinc-600 hover:text-zinc-400 transition-colors"
           >
-            + Add Machine
+            {getLocale() === "zh" ? "EN" : "中文"}
           </button>
-        )}
+        </div>
       </nav>
 
       <div className="flex-1 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center h-full text-zinc-500">
             <div className="animate-spin h-6 w-6 border-2 border-zinc-600 border-t-zinc-300 rounded-full mr-3" />
-            Loading...
+            {t("nav.loading")}
           </div>
         ) : view === "machines" ? (
           <div className="h-full overflow-y-auto">
