@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # 原生依赖（better-sqlite3）与 Electron 本体都在 npm 生态里，供应链风险集中在这里。
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      dev:
+        dependency-type: "development"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
