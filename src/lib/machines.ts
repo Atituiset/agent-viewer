@@ -5,17 +5,29 @@ import { safeStorage } from "electron";
 import type { MachineConfig } from "./types";
 import { discoverSshConfigMachines } from "./ssh-config";
 
-const CONFIG_DIR = path.join(os.homedir(), ".config", "agent-viewer");
-const MACHINES_FILE = path.join(CONFIG_DIR, "machines.json");
+const CONFIG_DIR_ENV = "AGENT_VIEWER_CONFIG_DIR";
+
+/** 配置目录：默认 ~/.config/agent-viewer，可用环境变量覆盖（测试隔离用）。 */
+function configDir(): string {
+  return process.env[CONFIG_DIR_ENV] || path.join(os.homedir(), ".config", "agent-viewer");
+}
+
+/** 惰性求值，避免模块加载时就定型路径。 */
+function machinesFile(): string {
+  return path.join(configDir(), "machines.json");
+}
 // 被用户删掉的自动发现机器 id，防止下次 load 又冒出来。
-const HIDDEN_AUTO_FILE = path.join(CONFIG_DIR, "ssh-config-hidden.json");
+function hiddenAutoFile(): string {
+  return path.join(configDir(), "ssh-config-hidden.json");
+}
 
 // machines.json 中密码字段的加密标记前缀。
 const ENC_PREFIX = "enc:v1:";
 
 function ensureConfigDir() {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const dir = configDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -69,12 +81,12 @@ function atomicWrite(file: string, data: string) {
 export function loadMachines(): MachineConfig[] {
   ensureConfigDir();
   let persisted: MachineConfig[];
-  if (!fs.existsSync(MACHINES_FILE)) {
+  if (!fs.existsSync(machinesFile())) {
     persisted = getDefaultMachines();
     saveMachines(persisted);
   } else {
     try {
-      const data = JSON.parse(fs.readFileSync(MACHINES_FILE, "utf-8")) as MachineConfig[];
+      const data = JSON.parse(fs.readFileSync(machinesFile(), "utf-8")) as MachineConfig[];
       if (!Array.isArray(data)) throw new Error("bad format");
       persisted = restoreFromDisk(data);
     } catch {
@@ -96,7 +108,7 @@ export function loadMachines(): MachineConfig[] {
 
 function loadHiddenAuto(): string[] {
   try {
-    const data = JSON.parse(fs.readFileSync(HIDDEN_AUTO_FILE, "utf-8"));
+    const data = JSON.parse(fs.readFileSync(hiddenAutoFile(), "utf-8"));
     return Array.isArray(data) ? data.filter((x) => typeof x === "string") : [];
   } catch {
     return [];
@@ -105,13 +117,13 @@ function loadHiddenAuto(): string[] {
 
 function hideAuto(id: string) {
   ensureConfigDir();
-  atomicWrite(HIDDEN_AUTO_FILE, JSON.stringify([...new Set([...loadHiddenAuto(), id])], null, 2));
+  atomicWrite(hiddenAutoFile(), JSON.stringify([...new Set([...loadHiddenAuto(), id])], null, 2));
 }
 
 export function saveMachines(machines: MachineConfig[]) {
   ensureConfigDir();
   // auto 机器是 ~/.ssh/config 的派生物，不落盘。
-  atomicWrite(MACHINES_FILE, JSON.stringify(sanitizeForDisk(machines.filter((m) => !m.auto)), null, 2));
+  atomicWrite(machinesFile(), JSON.stringify(sanitizeForDisk(machines.filter((m) => !m.auto)), null, 2));
 }
 
 export function addMachine(machine: Omit<MachineConfig, "id" | "status">): MachineConfig {

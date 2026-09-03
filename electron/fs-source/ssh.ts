@@ -38,6 +38,9 @@ export function resolvePrivateKey(raw: string | undefined, home = os.homedir()):
 const EXEC_TIMEOUT_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 15_000;
 
+/** 区分「命令正常执行但退出码非零」与「连接级失败」：前者不该触发重建连接再重试。 */
+class RemoteCommandError extends Error {}
+
 // 远端 python3 查询脚本：argv 均为 base64（db 路径 / SQL / 参数 JSON），rows 以 JSON 输出。
 const REMOTE_PY_QUERY = [
   "import sqlite3,sys,json,base64",
@@ -187,7 +190,7 @@ export class SshFileSource implements FileSource {
               if (code === 0) res(out);
               else
                 rej(
-                  new Error(
+                  new RemoteCommandError(
                     `remote command failed (exit ${code}): ${cmd.slice(0, 80)}${
                       err ? " :: " + err.trim().slice(0, 200) : ""
                     }`
@@ -201,8 +204,11 @@ export class SshFileSource implements FileSource {
     try {
       await this.ensureConnected();
       return await attempt();
-    } catch {
-      // 客户端可能在两次调用之间被对端断开：重建一次再试。
+    } catch (e) {
+      // 命令正常执行但非零退出（如 test -e miss）：连接是健康的，
+      // 不重连不重跑——exists()/detect 路径上的 miss 每个都要翻倍 RTT 太贵。
+      if (e instanceof RemoteCommandError) throw e;
+      // 连接级失败：客户端可能在两次调用之间被对端断开，重建一次再试。
       if (this.disposed) throw new Error("SshFileSource disposed");
       await this.ensureConnected();
       return attempt();

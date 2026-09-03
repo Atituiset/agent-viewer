@@ -33,6 +33,8 @@ export default function Home() {
   const [machinesError, setMachinesError] = useState<string | null>(null);
   const [addMachineError, setAddMachineError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // LIVE 轮询在途标记：防止慢连接上 setInterval 重入。
+  const pollInFlightRef = useRef(false);
 
   useEffect(() => {
     window.api.machines.list().then((r) => { if (r.data) setMachines(r.data); }).catch(() => {});
@@ -113,6 +115,9 @@ export default function Home() {
 
   const refreshSession = useCallback(async (force = false) => {
     if (!selectedSession || !selectedTool || !selectedMachine) return;
+    // 慢 SSH 上一次刷新可能还没完成：重叠轮询会让慢响应覆盖新数据，直接跳过本拍。
+    if (pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
     try {
       // LIVE 轮询：先比对文件指纹，没变就不重读全文。
       if (!force) {
@@ -135,7 +140,9 @@ export default function Home() {
       // 静默刷新（LIVE 轮询）：只在有数据时更新，错误不打断当前内容。
       if (r.error) console.error("refresh failed:", r.error);
       else setMessages(r.data || []);
-    } catch {}
+    } catch {} finally {
+      pollInFlightRef.current = false;
+    }
   }, [selectedSession, selectedTool, selectedMachine, projectPathFor, lastStamp]);
 
   useEffect(() => {

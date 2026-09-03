@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- SSH command failures (non-zero exit, e.g. `test -e` misses during detection)
+  no longer trigger a pointless reconnect-and-retry round trip.
+- LIVE polling no longer fires overlapping refreshes on slow SSH connections
+  (a slow response could previously overwrite newer data).
+- `machines.ts` config directory is overridable via `AGENT_VIEWER_CONFIG_DIR`
+  for testing; machine add/remove/persistence now has unit tests.
+
 ## [0.3.0] - 2026-09-03
 
 ### Security
