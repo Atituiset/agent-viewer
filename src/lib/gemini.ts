@@ -1,6 +1,7 @@
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import type { ConversationMessage, ToolCall, ToolSession } from "./types";
+import { pairToolOutputInMessages } from "./tool-pairing";
 
 interface GeminiToolCall { name?: string; args?: Record<string, unknown> }
 const ROOT = ".gemini/antigravity-cli";
@@ -51,19 +52,9 @@ export async function readGeminiSession(source: FileSource, conversationId: stri
           const toolCalls: ToolCall[] = ((entry.tool_calls as GeminiToolCall[]) || []).map((tc) => ({ name: tc.name || "unknown", input: tc.args || {} }));
           if (content || toolCalls.length) result.push({ id, role: "assistant", content, timestamp, toolCalls: toolCalls.length ? toolCalls : undefined, source: "gemini" });
         } else if (s === "MODEL" && ["LIST_DIRECTORY", "VIEW_FILE", "CODE_ACTION", "RUN_COMMAND"].includes(type)) {
-          // 工具结果配回上一条 assistant 未配对的 toolCall；配不到才独立成泡。
-          if (content) {
-            let paired = false;
-            for (let j = result.length - 1; j >= 0 && !paired; j--) {
-              const calls = result[j].toolCalls;
-              if (!calls) continue;
-              const tc = calls.find((c) => !c.output);
-              if (tc) {
-                tc.output = content;
-                paired = true;
-              }
-            }
-            if (!paired) result.push({ id, role: "tool", content, timestamp, source: "gemini" });
+          // 工具结果配回最近未配对的 toolCall；配不到才独立成泡。
+          if (content && !pairToolOutputInMessages(result, content)) {
+            result.push({ id, role: "tool", content, timestamp, source: "gemini" });
           }
         }
       } catch {}

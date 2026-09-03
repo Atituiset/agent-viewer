@@ -1,6 +1,7 @@
 import type { DirEntry, FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import type { ConversationMessage, ToolCall, ToolSession } from "./types";
+import { attachToolOutput } from "./tool-pairing";
 
 const ROOT = ".kimi-code/sessions";
 
@@ -158,13 +159,7 @@ function parseWire(wire: string): ConversationMessage[] {
           input: (e.args as Record<string, unknown>) || {},
         });
       } else if (e.type === "tool.result") {
-        const output = extractToolOutput(e.result);
-        for (let i = bufToolCalls.length - 1; i >= 0; i--) {
-          if (bufToolCalls[i].id === e.toolCallId && !bufToolCalls[i].output) {
-            bufToolCalls[i].output = output;
-            break;
-          }
-        }
+        attachToolOutput(bufToolCalls, extractToolOutput(e.result), (e.toolCallId as string) || undefined);
       }
     }
   }

@@ -1,6 +1,7 @@
 import type { DirEntry, FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import type { ClaudeMessage, ContentBlock, ConversationMessage, ToolCall, ToolSession } from "./types";
+import { pairToolOutputInMessages } from "./tool-pairing";
 
 const ROOT = ".claude/projects";
 
@@ -143,20 +144,8 @@ function parseSessionFile(content: string): ConversationMessage[] {
     } catch {}
   }
 
-  // Pair tool_results with the preceding tool_use so outputs show inline.
-  if (toolResults.length > 0) {
-    for (const result of toolResults) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (!msg.toolCalls) continue;
-        const match = msg.toolCalls.find((tc) => tc.id === result.toolUseId);
-        if (match) {
-          match.output = result.output;
-          break;
-        }
-      }
-    }
-  }
+  // 把 tool_result 按 tool_use_id 配回之前的 tool_use，输出内联显示（统一 helper，见 tool-pairing.ts）。
+  for (const r of toolResults) pairToolOutputInMessages(messages, r.output, r.toolUseId);
 
   return messages;
 }

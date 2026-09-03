@@ -1,6 +1,7 @@
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import type { ConversationMessage, ToolCall, ToolSession } from "./types";
+import { attachToolOutput, pairToolOutputInMessages } from "./tool-pairing";
 
 const ROOT = ".codex/sessions";
 
@@ -106,20 +107,8 @@ export async function readCodexSession(source: FileSource, sessionId: string): P
   const pairOutput = (callId: unknown, output: unknown) => {
     if (typeof callId !== "string" || !callId) return;
     const out = typeof output === "string" ? output : JSON.stringify(output ?? "");
-    for (let i = bufToolCalls.length - 1; i >= 0; i--) {
-      if (bufToolCalls[i].id === callId && !bufToolCalls[i].output) {
-        bufToolCalls[i].output = out;
-        return;
-      }
-    }
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const tcs = messages[i].toolCalls;
-      if (!tcs) continue;
-      const match = tcs.find((tc) => tc.id === callId && !tc.output);
-      if (match) {
-        match.output = out;
-        return;
-      }
+    if (!attachToolOutput(bufToolCalls, out, callId)) {
+      pairToolOutputInMessages(messages, out, callId);
     }
   };
 

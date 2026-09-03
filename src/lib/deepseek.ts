@@ -1,6 +1,7 @@
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import type { ConversationMessage, ToolCall, ToolSession } from "./types";
+import { pairToolOutputInMessages } from "./tool-pairing";
 
 const ROOT = ".deepseek/sessions";
 
@@ -52,16 +53,8 @@ export async function readDeepSeekSession(source: FileSource, sessionId: string)
           result[result.length - 1].toolCalls = parseDeepSeekToolCalls(msg.tool_calls);
         }
       } else if (role === "tool") {
-        // 工具结果配回上一条 assistant 未配对的 toolCall，不再丢弃内容。
-        for (let j = result.length - 1; j >= 0; j--) {
-          const calls = result[j].toolCalls;
-          if (!calls) continue;
-          const tc = calls.find((c) => !c.output);
-          if (tc) {
-            tc.output = content;
-            break;
-          }
-        }
+        // 工具结果配回最近未配对的 toolCall（deepseek 结果无 id，纯按时间就近）。
+        pairToolOutputInMessages(result, content);
       } else if (msg.tool_calls) {
         const toolCalls = parseDeepSeekToolCalls(msg.tool_calls);
         const last = result[result.length - 1];
