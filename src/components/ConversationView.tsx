@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ConversationMessage, ToolSession, DetectedTool } from "@/lib/types";
+import { useT } from "@/components/i18n";
 import MessageBubble from "./MessageBubble";
 import SwimlaneView from "./SwimlaneView";
 
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function ConversationView({ messages, sessionMeta, tool, error }: Props) {
+  const t = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const [search, setSearch] = useState("");
@@ -65,13 +67,13 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
                 {tool.name}
               </span>
             )}
-            {sessionMeta.model && <span>Model: {sessionMeta.model}</span>}
-            {sessionMeta.tokensInput != null && <span>Input: {sessionMeta.tokensInput.toLocaleString()}</span>}
-            {sessionMeta.tokensOutput != null && <span>Output: {sessionMeta.tokensOutput.toLocaleString()}</span>}
-            {sessionMeta.cost != null && sessionMeta.cost > 0 && <span>Cost: ${sessionMeta.cost.toFixed(4)}</span>}
+            {sessionMeta.model && <span>{t("conv.meta.model")} {sessionMeta.model}</span>}
+            {sessionMeta.tokensInput != null && <span>{t("conv.meta.input")} {sessionMeta.tokensInput.toLocaleString()}</span>}
+            {sessionMeta.tokensOutput != null && <span>{t("conv.meta.output")} {sessionMeta.tokensOutput.toLocaleString()}</span>}
+            {sessionMeta.cost != null && sessionMeta.cost > 0 && <span>{t("conv.meta.cost")} ${sessionMeta.cost.toFixed(4)}</span>}
             {sessionMeta.directory && (
               <span className="truncate" title={sessionMeta.directory}>
-                Dir: {sessionMeta.directory}
+                {t("conv.meta.dir")} {sessionMeta.directory}
               </span>
             )}
           </div>
@@ -85,10 +87,10 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
-              type="text"
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter messages by content, role, tool..."
+              placeholder={t("conv.filterPlaceholder")}
               className="w-full bg-zinc-800/40 border border-zinc-700/30 rounded-lg pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
             />
             {search && (
@@ -98,38 +100,40 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
                   onClick={() => setSearch("")}
                   className="text-zinc-600 hover:text-zinc-400 text-xs"
                 >
-                  Clear
+                  {t("conv.clearFilter")}
                 </button>
               </div>
             )}
           </div>
-          <div className="flex gap-1 flex-shrink-0">
+          <div className="flex gap-1 flex-shrink-0" role="group" aria-label="View mode">
             {(["waterfall", "swimlane"] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
+                aria-pressed={viewMode === mode}
                 className={`text-[11px] px-2.5 py-1.5 rounded-md border transition-colors font-medium ${
                   viewMode === mode
                     ? "border-blue-600 text-blue-400 bg-blue-900/20"
                     : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                {mode === "waterfall" ? "瀑布" : "泳道"}
+                {mode === "waterfall" ? t("conv.viewTimeline") : t("conv.viewSwimlane")}
               </button>
             ))}
           </div>
-          <div className="flex gap-1 flex-shrink-0">
+          <div className="flex gap-1 flex-shrink-0" role="group" aria-label="Density">
             {(["compact", "full"] as const).map((d) => (
               <button
                 key={d}
                 onClick={() => setDensity(d)}
+                aria-pressed={density === d}
                 className={`text-[11px] px-2.5 py-1.5 rounded-md border transition-colors font-medium ${
                   density === d
                     ? "border-blue-600 text-blue-400 bg-blue-900/20"
                     : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                {d === "compact" ? "摘要" : "详细"}
+                {d === "compact" ? t("conv.compact") : t("conv.full")}
               </button>
             ))}
           </div>
@@ -143,7 +147,7 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
         <div className="max-w-5xl mx-auto">
           {error && (
             <div className="rounded-lg border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300 mb-5">
-              <span className="font-medium">Failed to load conversation:</span> {error}
+              <span className="font-medium">{t("conv.error")}</span> {error}
             </div>
           )}
           <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
@@ -167,7 +171,7 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
           </div>
           {filtered.length === 0 && messages.length > 0 && (
             <div className="text-center text-zinc-600 py-16">
-              <p>No messages match your filter.</p>
+              <p>{t("conv.noMatch")}</p>
             </div>
           )}
         </div>

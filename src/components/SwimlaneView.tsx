@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ConversationMessage } from "@/lib/types";
+import { useT, type MsgKey } from "@/components/i18n";
 import MarkdownContent from "./MarkdownContent";
 import ToolCallBlock from "./ToolCallBlock";
 
@@ -13,11 +15,15 @@ interface Props {
 interface LaneDef {
   id: string;
   label: string;
+  /** user/main 泳道用 i18n key，渲染时翻译。 */
+  labelKey?: MsgKey;
   width: number;
 }
 
 const THINK_CLAMP = 240;
 const CONTENT_CLAMP = 400;
+const COL_GAP = 32;
+const ROW_GAP = 36;
 
 /** user 消息（无 agent 归属）进 User 泳道，其余主进程消息进 Main，subagent 消息进各自泳道。 */
 function laneOf(m: ConversationMessage): string {
@@ -29,8 +35,15 @@ function laneOf(m: ConversationMessage): string {
  * 交互时序视图：所有消息按时间排在共享纵轴上，各自落在所属泳道；
  * 相邻消息之间画箭头，跨泳道的交互（用户提问、Task 派生 subagent、
  * subagent 返回结果）在图上自然呈现为跨列箭头。
+ *
+ * 性能设计：旧实现对每个节点 getBoundingClientRect 测量再画箭头，
+ * 全量挂载在大会话下不可用。现在：
+ * - x 方向是纯函数——列宽/间距固定，不量 DOM；
+ * - y 方向用 virtualizer 的 start + ResizeObserver 实测高度；
+ * - 只渲染视口附近的节点，箭头在两者都已知时直接由几何算出。
  */
 export default function SwimlaneView({ messages, compact }: Props) {
+  const t = useT();
   const sorted = useMemo(
     () => [...messages].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
     [messages]
@@ -47,122 +60,135 @@ export default function SwimlaneView({ messages, compact }: Props) {
       .filter((id) => present.has(id))
       .map((id) => ({
         id,
-        label: labels.get(id) || (id === "user" ? "User" : id === "main" ? "Main" : id),
+        label: labels.get(id) || id,
+        labelKey: id === "user" ? ("swimlane.user" as const) : id === "main" ? ("swimlane.main" as const) : undefined,
         width: id === "user" ? 200 : id === "main" ? 440 : 380,
       }));
   }, [sorted]);
 
   const laneIndex = useMemo(() => new Map(lanes.map((l, i) => [l.id, i])), [lanes]);
 
-  // ---- 箭头测量：渲染后量每个节点的位置，画相邻节点的贝塞尔连线 ----
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const nodeRefs = useRef(new Map<number, HTMLElement>());
-  const [arrows, setArrows] = useState<{ key: number; d: string }[]>([]);
-  const [svgSize, setSvgSize] = useState({ w: 0, h: 0 });
+  // 列几何：x 方向不用量 DOM。cols[i] = 第 i 泳道的 left/center/width。
+  const geometry = useMemo(() => {
+    let x = 0;
+    const cols = lanes.map((l) => {
+      const c = { left: x, width: l.width, center: x + l.width / 2 };
+      x += l.width + COL_GAP;
+      return c;
+    });
+    return { cols, width: lanes.length ? x - COL_GAP : 0 };
+  }, [lanes]);
 
-  const relayout = useCallback(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const wrect = wrap.getBoundingClientRect();
-    const pts: { x: number; top: number; bottom: number }[] = [];
-    for (let i = 0; i < sorted.length; i++) {
-      const el = nodeRefs.current.get(i);
-      if (!el) return; // 节点未齐，下轮再画
-      const r = el.getBoundingClientRect();
-      pts.push({ x: r.left - wrect.left + r.width / 2, top: r.top - wrect.top, bottom: r.bottom - wrect.top });
-    }
-    setSvgSize({ w: wrap.scrollWidth, h: wrap.scrollHeight });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line react-hooks/incompatible-library -- @tanstack/react-virtual 未在 React Compiler 兼容清单内的误报（同 ConversationView）
+  const virtualizer = useVirtualizer({
+    count: sorted.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 180,
+    overscan: 8,
+    getItemKey: (i) => sorted[i].id || i,
+  });
+  const items = virtualizer.getVirtualItems();
+
+  // 节点垂直位置（可见窗口内已知）；箭头在相邻两点都已知时才画——
+  // 未知的点必在可视范围外，画出来也看不见。
+  const arrows = useMemo(() => {
+    const pos = new Map<number, { start: number; size: number }>();
+    for (const vi of items) pos.set(vi.index, { start: vi.start, size: vi.size });
     const out: { key: number; d: string }[] = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i];
-      const b = pts[i + 1];
-      const mid = (a.bottom + b.top) / 2;
-      out.push({ key: i, d: `M ${a.x} ${a.bottom} C ${a.x} ${mid}, ${b.x} ${mid}, ${b.x} ${b.top}` });
+    for (const [i, a] of pos) {
+      const b = pos.get(i + 1);
+      if (!b) continue;
+      const colA = geometry.cols[laneIndex.get(laneOf(sorted[i])) ?? 0];
+      const colB = geometry.cols[laneIndex.get(laneOf(sorted[i + 1])) ?? 0];
+      const yA = a.start + a.size - ROW_GAP; // 节点视觉底部（扣除行距 padding）
+      const yB = b.start;
+      const mid = (yA + yB) / 2;
+      out.push({ key: i, d: `M ${colA.center} ${yA} C ${colA.center} ${mid}, ${colB.center} ${mid}, ${colB.center} ${yB}` });
     }
-    setArrows(out);
-  }, [sorted]);
-
-  useLayoutEffect(() => {
-    relayout();
-  }, [relayout, lanes, compact]);
-
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const ro = new ResizeObserver(relayout);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [relayout]);
+    return out.sort((p, q) => p.key - q.key);
+  }, [items, sorted, laneIndex, geometry]);
 
   return (
-    <div className="flex-1 overflow-auto scrollbar-thin px-6 py-6">
-      <div ref={wrapRef} className="relative min-w-max mx-auto">
-        <svg
-          className="absolute inset-0 pointer-events-none z-0"
-          width={svgSize.w}
-          height={svgSize.h}
-        >
-          <defs>
-            <marker id="lane-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#71717a" />
-            </marker>
-          </defs>
-          {arrows.map((a) => (
-            <path key={a.key} d={a.d} fill="none" stroke="#71717a" strokeWidth={1.5} markerEnd="url(#lane-arrow)" />
-          ))}
-        </svg>
-
+    <div ref={scrollRef} className="flex-1 overflow-auto scrollbar-thin px-6 py-6">
+      <div className="mx-auto" style={{ width: geometry.width }}>
+        {/* 泳道表头（sticky） */}
         <div
-          className="relative z-10 grid"
-          style={{
-            gridTemplateColumns: lanes.map((l) => `${l.width}px`).join(" "),
-            columnGap: "32px",
-            rowGap: "36px",
-          }}
+          className="sticky top-0 z-20 grid"
+          style={{ gridTemplateColumns: lanes.map((l) => `${l.width}px`).join(" "), columnGap: COL_GAP }}
         >
-          {lanes.map((l, i) => (
-            <div
-              key={l.id}
-              style={{ gridColumn: i + 1, gridRow: 1 }}
-              className="sticky top-0 z-20 px-3 py-2 rounded-lg bg-zinc-900/95 border border-[var(--sidebar-border)] text-xs font-medium text-zinc-300 text-center truncate"
-              title={l.label}
-            >
-              {l.label}
-            </div>
-          ))}
+          {lanes.map((l) => {
+            const label = l.labelKey ? t(l.labelKey) : l.label;
+            return (
+              <div
+                key={l.id}
+                className="px-3 py-2 rounded-lg bg-zinc-900/95 border border-[var(--sidebar-border)] text-xs font-medium text-zinc-300 text-center truncate"
+                title={label}
+              >
+                {label}
+              </div>
+            );
+          })}
+        </div>
 
+        {/* 虚拟化节点区 */}
+        <div className="relative" style={{ height: virtualizer.getTotalSize(), marginTop: 12 }}>
           {/* 泳道中轴虚线 */}
-          {lanes.map((l, i) => (
+          {geometry.cols.map((c, i) => (
             <div
-              key={`spine-${l.id}`}
-              style={{ gridColumn: i + 1, gridRow: `2 / ${sorted.length + 2}` }}
-              className="justify-self-center w-0 border-l border-dashed border-zinc-800"
+              key={`spine-${lanes[i].id}`}
+              className="absolute top-0 bottom-0 border-l border-dashed border-zinc-800 pointer-events-none"
+              style={{ left: c.center }}
             />
           ))}
 
-          {sorted.map((m, i) => (
-            <div
-              key={m.id || i}
-              ref={(el) => {
-                if (el) nodeRefs.current.set(i, el);
-                else nodeRefs.current.delete(i);
-              }}
-              style={{ gridColumn: (laneIndex.get(laneOf(m)) ?? 0) + 1, gridRow: i + 2 }}
-            >
-              <LaneNode msg={m} compact={compact} />
-            </div>
-          ))}
+          <svg
+            className="absolute inset-0 pointer-events-none z-0"
+            width={geometry.width}
+            height="100%"
+          >
+            <defs>
+              <marker id="lane-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#71717a" />
+              </marker>
+            </defs>
+            {arrows.map((a) => (
+              <path key={a.key} d={a.d} fill="none" stroke="#71717a" strokeWidth={1.5} markerEnd="url(#lane-arrow)" />
+            ))}
+          </svg>
+
+          {items.map((vi) => {
+            const m = sorted[vi.index];
+            const col = geometry.cols[laneIndex.get(laneOf(m)) ?? 0];
+            return (
+              <div
+                key={vi.key}
+                data-index={vi.index}
+                ref={virtualizer.measureElement}
+                className="absolute z-10"
+                style={{
+                  top: 0,
+                  left: col.left,
+                  width: col.width,
+                  transform: `translateY(${vi.start}px)`,
+                  paddingBottom: ROW_GAP,
+                }}
+              >
+                <LaneNode msg={m} compact={compact} />
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
 
-const ROLE_STYLE: Record<string, { label: string; ring: string }> = {
-  user: { label: "User", ring: "border-blue-800/40" },
-  assistant: { label: "Assistant", ring: "border-[var(--sidebar-border)]" },
-  system: { label: "System", ring: "border-yellow-900/30" },
-  tool: { label: "Tool", ring: "border-amber-900/30" },
+const ROLE_STYLE: Record<string, { labelKey: MsgKey; ring: string }> = {
+  user: { labelKey: "role.user", ring: "border-blue-800/40" },
+  assistant: { labelKey: "role.assistant", ring: "border-[var(--sidebar-border)]" },
+  system: { labelKey: "role.system", ring: "border-yellow-900/30" },
+  tool: { labelKey: "role.tool", ring: "border-amber-900/30" },
 };
 
 /** 工具调用分类：MCP（mcp__server__tool 前缀）、Skill、内置工具（Bash/Read/...）。 */
@@ -222,6 +248,7 @@ function ToolCallRows({ toolCalls }: { toolCalls: NonNullable<ConversationMessag
 }
 
 function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolean }) {
+  const t = useT();
   const [xContent, setXContent] = useState(false);
   const [xThink, setXThink] = useState(false);
   const style = ROLE_STYLE[msg.role] || ROLE_STYLE.assistant;
@@ -231,7 +258,7 @@ function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolea
   return (
     <div className={`rounded-xl border bg-zinc-900/70 px-4 py-3 ${style.ring}`}>
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{style.label}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{t(style.labelKey)}</span>
         {msg.agentLabel && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-300 border border-indigo-800/40 truncate">
             {msg.agentLabel}
@@ -244,13 +271,13 @@ function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolea
 
       {msg.thinking && (
         <div className="mb-2 rounded-lg bg-indigo-950/30 border border-indigo-900/30 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wider text-indigo-400 mb-1">Thinking</div>
+          <div className="text-[10px] uppercase tracking-wider text-indigo-400 mb-1">{t("msg.thinkingTitle")}</div>
           <div className="text-xs text-indigo-200/70 whitespace-pre-wrap">
             {clampThink ? msg.thinking!.slice(0, THINK_CLAMP) + "…" : msg.thinking}
           </div>
           {compact && msg.thinking.length > THINK_CLAMP && (
             <button onClick={() => setXThink(!xThink)} className="text-[11px] text-indigo-400 hover:text-indigo-300 mt-1">
-              {xThink ? "▴ 收起" : `▾ 展开（${msg.thinking.length.toLocaleString()} 字符）`}
+              {xThink ? t("msg.collapse") : t("msg.expandContent", { n: msg.thinking.length.toLocaleString() })}
             </button>
           )}
         </div>
@@ -264,7 +291,7 @@ function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolea
                 {msg.content.slice(0, CONTENT_CLAMP)}…
               </div>
               <button onClick={() => setXContent(true)} className="text-[11px] text-blue-400 hover:text-blue-300 mt-1">
-                ▾ 展开全文（{msg.content.length.toLocaleString()} 字符）
+                {t("msg.expandContent", { n: msg.content.length.toLocaleString() })}
               </button>
             </div>
           ) : (
@@ -272,7 +299,7 @@ function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolea
               <MarkdownContent content={msg.content} />
               {compact && msg.content.length > CONTENT_CLAMP && (
                 <button onClick={() => setXContent(false)} className="text-[11px] text-zinc-500 hover:text-zinc-300 mt-1">
-                  ▴ 收起
+                  {t("msg.collapse")}
                 </button>
               )}
             </div>
