@@ -60,11 +60,34 @@ function asQueryable(source: FileSource): (FileSource & SqliteQueryable) | null 
 }
 
 /**
+ * 给 DbLike 的底层查询错误打标记（塞进 sink）。
+ * 用于区分「传输/查询失败」（可回退）与「回调 fn 抛出的数据/解析错误」（直接冒泡）。
+ */
+function trackErrors(db: DbLike, sink: Set<unknown>): DbLike {
+  return {
+    prepare: (sql) => ({
+      all: async (...params) => {
+        try {
+          return await db.prepare(sql).all(...params);
+        } catch (e) {
+          sink.add(e);
+          throw e;
+        }
+      },
+    }),
+  };
+}
+
+/**
  * 打开 source 上的 sqlite 并回调，按 source 能力选路径：
  * - 实现了 querySqlite 的 source（WSL/SSH）：远端直接查——UNC 9p 上 SQLite 直开必败，
  *   GB 级 db 整库拷贝也不可行；
  * - 其他本地 source：直接只读打开原文件；
  * - 以上都不行：回退整库拷贝（小 db 没问题）。
+ *
+ * 回退只针对「传输/打开」失败（远端无 python3、断线、本地直开被 WAL 挡住等）——
+ * 回调 fn 自身抛出的数据/解析错误直接冒泡给调用方，绝不触发整库拷贝。
+ * 否则远端库里一条脏记录就会导致 GB 级 db 被无谓地拉回本地。
  */
 export async function withSqliteDb<T>(
   source: FileSource,
@@ -73,26 +96,36 @@ export async function withSqliteDb<T>(
 ): Promise<T> {
   const queryable = asQueryable(source);
   if (queryable) {
+    const transportErrors = new Set<unknown>();
+    const db: DbLike = trackErrors({
+      prepare: (sql) => ({ all: (...params) => queryable.querySqlite(rel, sql, params) }),
+    }, transportErrors);
     try {
-      return await fn({
-        prepare: (sql) => ({ all: (...params) => queryable.querySqlite(rel, sql, params) }),
-      });
-    } catch {
-      // 远端查询失败（如无 python3）：落回整库拷贝。
+      return await fn(db);
+    } catch (e) {
+      if (!transportErrors.has(e)) throw e; // 数据/解析错误：不回退，直接上报
+      // 传输失败（无 python3 等）：落回本地直开/整库拷贝。
     }
   }
   const local = source.localPath?.(rel);
   if (local) {
+    let db: SqliteDatabase | null = null;
     try {
       const Database = await loadDatabase();
-      const db = new Database(local, { readonly: true, fileMustExist: true });
+      db = new Database(local, { readonly: true, fileMustExist: true });
+    } catch {
+      // 直开失败（如 WAL 恢复需要写权限、文件损坏）：落回整库拷贝。
+    }
+    if (db) {
+      const dbErrors = new Set<unknown>();
       try {
-        return await fn(wrapDb(db));
+        return await fn(trackErrors(wrapDb(db), dbErrors));
+      } catch (e) {
+        // 底层查询失败也允许回退；fn 的数据/解析错误直接冒泡。
+        if (!dbErrors.has(e)) throw e;
       } finally {
         try { db.close(); } catch {}
       }
-    } catch {
-      // 直开失败（如 WAL 恢复需要写权限）：落回整库拷贝。
     }
   }
   const buf = await source.readFileBuffer(rel);

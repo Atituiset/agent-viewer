@@ -2,6 +2,7 @@ import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import { withSqliteDb } from "../../electron/sqlite";
 import type { ConversationMessage, ToolCall, ToolSession } from "./types";
+import { pairToolOutputInMessages } from "./tool-pairing";
 
 interface HermesSessionEntry { session_id?: string; display_name?: string; created_at?: string; origin?: { chat_id?: string } }
 interface HermesMessage { role?: string; content?: unknown; tool_calls?: HermesToolCall[] }
@@ -46,41 +47,49 @@ async function listFromSessionsJson(source: FileSource): Promise<ToolSession[]> 
   if (!(await source.exists(sessionsPath))) return [];
   try {
     const data = JSON.parse(await source.readFile(sessionsPath)) as Record<string, unknown>;
-    const out: ToolSession[] = [];
-    for (const entry of Object.values(data)) {
-      const e = entry as HermesSessionEntry;
-      const id = e.session_id || "";
-      if (!id) continue;
-      const fallbackTitle = (await extractHermesTitle(source, id)) || `Hermes ${id}`;
-      out.push({
-        id,
-        title: e.display_name || fallbackTitle,
-        createdAt: e.created_at || new Date().toISOString(),
-        messageCount: await countHermesMessages(source, id),
-        directory: e.origin?.chat_id || "",
-      });
-    }
-    return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const entries = Object.values(data) as HermesSessionEntry[];
+    // 每个 dump 文件只读一次（之前 title/messageCount 各读一遍，N+1 双读），
+    // 且跨 session 并行——SSH 场景下 elapsed 从串行 2N 个 RTT 降到一批。
+    const sessions = await Promise.all(
+      entries.map(async (e): Promise<ToolSession | null> => {
+        const id = e.session_id || "";
+        if (!id) return null;
+        const dump = await readHermesDumpInfo(source, id);
+        return {
+          id,
+          title: e.display_name || dump.title || `Hermes ${id}`,
+          createdAt: e.created_at || new Date().toISOString(),
+          messageCount: dump.messageCount,
+          directory: e.origin?.chat_id || "",
+        };
+      })
+    );
+    return sessions
+      .filter((s): s is ToolSession => !!s)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   } catch {
     return [];
   }
 }
 
-async function extractHermesTitle(source: FileSource, sessionId: string): Promise<string | null> {
-  const messages = await readHermesSession(source, sessionId);
-  const firstUser = messages.find((m) => m.role === "user");
-  return firstUser ? cleanTitle(firstUser.content) : null;
-}
-
-async function countHermesMessages(source: FileSource, sessionId: string): Promise<number> {
+/** 一次性读出 dump 的展示信息（标题 + 消息数），避免同一文件读两遍。 */
+async function readHermesDumpInfo(
+  source: FileSource,
+  sessionId: string
+): Promise<{ title: string | null; messageCount: number }> {
   const latest = await findLatestHermesDump(source, sessionId);
-  if (!latest) return 0;
+  if (!latest) return { title: null, messageCount: 0 };
   try {
     const data = JSON.parse(await source.readFile(latest)) as Record<string, unknown>;
     const body = ((data.request as Record<string, unknown>)?.body as Record<string, unknown>) || {};
-    return ((body.messages as HermesMessage[]) || []).length;
+    const messages = ((body.messages as HermesMessage[]) || []);
+    const firstUser = messages.find((m) => m.role === "user");
+    return {
+      title: firstUser ? cleanTitle(normalizeHermesContent(firstUser.content)) : null,
+      messageCount: messages.length,
+    };
   } catch {
-    return 0;
+    return { title: null, messageCount: 0 };
   }
 }
 
@@ -106,22 +115,11 @@ async function readFromStateDb(source: FileSource, sessionId: string): Promise<C
         const timestamp = row.timestamp
           ? new Date((row.timestamp as number) * 1000).toISOString()
           : new Date().toISOString();
-        // 工具结果按 tool_call_id 配回 assistant 的 toolCall，不再独立成泡。
+        // 工具结果按 tool_call_id 配回 assistant 的 toolCall，不再独立成泡；
+        // 配不到（id 不匹配/已全部配对）才作为 tool 消息落下。
         if (role === "tool") {
           const output = normalizeHermesContent(row.content);
-          let paired = false;
-          for (let j = result.length - 1; j >= 0 && !paired; j--) {
-            const calls = result[j].toolCalls;
-            if (!calls) continue;
-            for (const tc of calls) {
-              if (tc.output) continue;
-              if (row.tool_call_id && tc.id && tc.id !== row.tool_call_id) continue;
-              tc.output = output;
-              paired = true;
-              break;
-            }
-          }
-          if (paired) continue;
+          if (pairToolOutputInMessages(result, output, (row.tool_call_id as string) || undefined)) continue;
         }
         let toolCalls: ToolCall[] | undefined;
         if (typeof row.tool_calls === "string" && row.tool_calls) {
