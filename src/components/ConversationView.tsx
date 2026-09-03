@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ConversationMessage, ToolSession, DetectedTool } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import SwimlaneView from "./SwimlaneView";
@@ -39,6 +40,19 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
       scrollRef.current?.scrollTo({ top: 0 });
     }
   }, [currentSessionId]);
+
+  // 虚拟化：大会话（上万条消息）只挂载视口附近的行。
+  // estimateSize 是粗估值，measureElement 用 ResizeObserver 拿真实高度
+  // 并在内容展开/收起后自动重测。
+  // eslint-disable-next-line react-hooks/incompatible-library -- @tanstack/react-virtual 未在 React Compiler 兼容清单内的误报，运行/构建均正常
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 140,
+    overscan: 8,
+    getItemKey: (i) => filtered[i].id || i,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
 
   return (
     <div className="flex flex-col h-full">
@@ -126,15 +140,31 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
         <SwimlaneView messages={filtered} compact={compact} />
       ) : (
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-8">
-        <div className="max-w-5xl mx-auto space-y-5">
+        <div className="max-w-5xl mx-auto">
           {error && (
-            <div className="rounded-lg border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+            <div className="rounded-lg border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300 mb-5">
               <span className="font-medium">Failed to load conversation:</span> {error}
             </div>
           )}
-          {filtered.map((msg, i) => (
-            <MessageBubble key={msg.id || i} message={msg} compact={compact} />
-          ))}
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+            {virtualItems.map((vi) => (
+              <div
+                key={vi.key}
+                data-index={vi.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                  paddingBottom: 20, // 原 space-y-5 的行间距
+                }}
+              >
+                <MessageBubble message={filtered[vi.index]} compact={compact} />
+              </div>
+            ))}
+          </div>
           {filtered.length === 0 && messages.length > 0 && (
             <div className="text-center text-zinc-600 py-16">
               <p>No messages match your filter.</p>
