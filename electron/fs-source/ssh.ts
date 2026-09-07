@@ -316,6 +316,44 @@ export class SshFileSource implements FileSource {
     }
   }
 
+  /**
+   * 文件驱动的发现（不依赖容器目录名）：一条 find 直接按扩展名找转录文件，
+   * 输出 <mtime>\t<path>，本地反推 agent 根目录。剪枝在 find -prune 里做，
+   * 单 RTT。失败返回 []（该 source 只剩目录名扫描那条腿）。
+   */
+  async scanTranscriptFiles(): Promise<Array<{ rel: string; mtime: number }>> {
+    try {
+      const home = this.abs(".");
+      const homeNorm = home.endsWith("/") ? home.slice(0, -1) : home;
+      const prune = [
+        "node_modules", ".git", ".cache", ".npm", ".cargo", ".rustup", ".m2", ".gradle",
+        ".docker", ".vscode-server", "target", "vendor",
+      ]
+        .map((d) => `-name ${this.sh(d)} -o`)
+        .join(" ");
+      // 三个点目录领地 + 限制深度；%T@ = mtime(epoch 小数)
+      const cmd = [
+        `find ${this.sh(home)} ${this.sh(path.posix.join(home, ".config"))} ${this.sh(path.posix.join(home, ".local/share"))} ${this.sh(path.posix.join(home, ".local/state"))}`,
+        `\\( ${prune} -false \\) -prune -o`,
+        "-type f \\( -name '*.jsonl' -o -name '*.json' \\)",
+        "-printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -2000",
+      ].join(" ");
+      const out = await this.exec(cmd);
+      const files: Array<{ rel: string; mtime: number }> = [];
+      for (const line of out.split("\n")) {
+        const tab = line.indexOf("\t");
+        if (tab <= 0) continue;
+        const mtime = Number(line.slice(0, tab));
+        const p = line.slice(tab + 1).trim();
+        if (!Number.isFinite(mtime) || !p.startsWith(homeNorm + "/")) continue;
+        files.push({ rel: p.slice(homeNorm.length + 1), mtime });
+      }
+      return files;
+    } catch {
+      return [];
+    }
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
     try {

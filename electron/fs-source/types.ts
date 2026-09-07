@@ -33,5 +33,11 @@ export interface FileSource {
    * 未实现则该 source 不参与启发式发现。
    */
   scanAgentStorage?(): Promise<string[]>;
+  /**
+   * 文件驱动的启发式发现：返回 $HOME 下（含 .config/.local/share 点目录领地，
+   * 深度 ≤4，剪枝缓存/构建目录）的转录文件，附带 mtime 用于活跃度排序。
+   * 不依赖容器目录名（sessions 等叫什么都行），适合目录命名完全未知的环境。
+   */
+  scanTranscriptFiles?(): Promise<Array<{ rel: string; mtime: number }>>;
   dispose?(): Promise<void>;
 }

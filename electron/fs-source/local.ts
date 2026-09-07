@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import type { FileSource, DirEntry, FileStat } from "./types";
-import { resolvePath } from "./util";
+import { resolvePath, TRANSCRIPT_PRUNE_DIRS, isTranscriptFileName, extractTranscriptRoot } from "./util";
 
 const SCAN_DIR_NAMES = ["sessions", "projects", "history"];
 const SCAN_SKIP_PREFIXES = [".git/", "node_modules/", ".cache/"];
@@ -42,6 +42,68 @@ export function scanHomeForAgentStorage(home: string): string[] {
     }
   }
   return out.filter((rel) => !SCAN_SKIP_PREFIXES.some((p) => rel.startsWith(p)));
+}
+
+/**
+ * 文件驱动的发现（不依赖目录名）：DFS $HOME（+ .config/.local/share）下
+ * 点目录领地，深度 ≤4，剪掉缓存/构建目录，收集 *.jsonl/*.json + mtime。
+ * 结果按 mtime 降序（活跃度高的排前面，采样验证按序先试）。
+ */
+export function scanHomeForTranscripts(
+  home: string,
+  maxFiles = 2000,
+  maxDirs = 20000
+): Array<{ rel: string; mtime: number }> {
+  const out: Array<{ rel: string; mtime: number }> = [];
+  const roots = [
+    { abs: home, prefix: "", dot: true },
+    { abs: path.posix.join(home, ".config"), prefix: ".config", dot: false },
+    { abs: path.posix.join(home, ".local", "share"), prefix: ".local/share", dot: false },
+    { abs: path.posix.join(home, ".local", "state"), prefix: ".local/state", dot: false },
+  ];
+  let filesHit = 0;
+  let dirsSeen = 0;
+
+  const walk = (abs: string, rel: string, depth: number): void => {
+    if (filesHit >= maxFiles || dirsSeen >= maxDirs) return;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    dirsSeen++;
+    for (const e of entries) {
+      if (filesHit >= maxFiles) return;
+      const childAbs = path.join(abs, e.name);
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (depth >= 4) continue; // 深度上限（owner + ≤2 层容器 + 文件）
+        if (TRANSCRIPT_PRUNE_DIRS.has(e.name)) continue;
+        // 点目录领地之外（如 ~/Projects）不递归——agent 数据约定在 dotfile 下。
+        if (rel === "" && !e.name.startsWith(".")) continue;
+        if (rel === ".config" || rel === ".local/share" || rel === ".local/state") {
+          if (e.name.startsWith(".") || TRANSCRIPT_PRUNE_DIRS.has(e.name)) continue;
+        }
+        walk(childAbs, childRel, depth + 1);
+      } else if (e.isFile() && isTranscriptFileName(e.name)) {
+        // 只收点目录领地内的（.config/<x>/…、.<x>/…；$HOME 根下的散文件不算）
+        if (!extractTranscriptRoot(childRel)) continue;
+        try {
+          const st = fs.statSync(childAbs);
+          out.push({ rel: childRel, mtime: st.mtimeMs });
+          filesHit++;
+        } catch {}
+      }
+    }
+  };
+
+  for (const r of roots) {
+    if (filesHit >= maxFiles) break;
+    walk(r.abs, r.prefix, r.prefix ? 1 : 0);
+  }
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out;
 }
 
 export class LocalFileSource implements FileSource {
@@ -96,6 +158,10 @@ export class LocalFileSource implements FileSource {
 
   scanAgentStorage(): Promise<string[]> {
     return Promise.resolve(scanHomeForAgentStorage(this.home));
+  }
+
+  scanTranscriptFiles(): Promise<Array<{ rel: string; mtime: number }>> {
+    return Promise.resolve(scanHomeForTranscripts(this.home));
   }
 
   async lineCount(p: string): Promise<number> {

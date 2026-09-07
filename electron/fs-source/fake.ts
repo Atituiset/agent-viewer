@@ -1,5 +1,6 @@
 import path from "path";
 import type { FileSource, DirEntry, FileStat } from "./types";
+import { extractTranscriptRoot, isTranscriptFileName } from "./util";
 
 const SCAN_DIR_NAMES = ["sessions", "projects", "history"];
 
@@ -97,5 +98,19 @@ export class FakeFileSource implements FileSource {
       }
     }
     return Array.from(out);
+  }
+
+  /** 文件驱动发现：返回点目录领地内、深度达标的所有 jsonl/json + mtime（fake 用内容长度当确定性占位）。 */
+  async scanTranscriptFiles(): Promise<Array<{ rel: string; mtime: number }>> {
+    const out: Array<{ rel: string; mtime: number }> = [];
+    for (const [key, buf] of this.files) {
+      const rel = key.startsWith(this.home + "/") ? key.slice(this.home.length + 1) : null;
+      if (!rel) continue;
+      if (!extractTranscriptRoot(rel)) continue;
+      const name = rel.split("/").pop() ?? "";
+      if (!isTranscriptFileName(name)) continue;
+      out.push({ rel, mtime: buf.length }); // 用内容长度当 mtime 占位，保持确定性
+    }
+    return out.sort((a, b) => a.rel.localeCompare(b.rel));
   }
 }

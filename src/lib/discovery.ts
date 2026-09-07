@@ -1,5 +1,6 @@
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
+import { extractTranscriptRoot } from "../../electron/fs-source/util";
 import { detectKind, encodeGenericId, type GenericKind } from "./generic";
 import { TOOLS } from "./registry";
 import type { DetectedTool } from "./types";
@@ -7,12 +8,15 @@ import type { DetectedTool } from "./types";
 /**
  * 启发式 agent 自发现。
  *
- * 已知 7 家 agent 走 registry 的固定 detectPaths；这里的任务是接住「不在名单里、
- * 但遵循市面共识存储布局」的 agent（企业内部 CLI、新出的 agent 等）：
- *   ~/.<agent>/sessions|projects|history 下的 *.jsonl / *.json 转录。
+ * 已知 7 家 agent 走 registry 的固定 detectPaths；这里的任务是接住「不在名单里」
+ * 的 agent（企业内部 CLI、新出的 agent）。两条互补的腿：
  *
- * 流程：scanAgentStorage 给出候选目录 → 排除已知 agent 领地与已知噪声 →
- * 逐候选采样验证（能被三种通用解析器之一定义才收录）→ 生成动态 tool 条目。
+ * 1. 文件驱动（主）：scanTranscriptFiles 直接按 *.jsonl/*.json 找转录文件，
+ *    反推所在目录为会话根，再采样验证格式。**不依赖容器目录叫什么名字**——
+ *    sessions/chats/runs/任意名都行，适合目录命名完全未知的环境。
+ * 2. 目录名驱动（补充）：scanAgentStorage 找 sessions/projects/history 三个
+ *    约定名，作为文件驱动扫不到时的兜底（两者结果按根目录去重合并）。
+ *
  * 扫描/验证全程容错：任何失败都只是「少发现一个」，绝不影响已知 agent 的显示。
  */
 
@@ -47,20 +51,23 @@ const NOISE_DIR_BASES = new Set([
 ]);
 
 function isNoise(rootRel: string): boolean {
-  // rootRel 形如 ".<agent>/sessions" 或 ".config/<x>/history" 或 ".local/share/<x>/sessions"
+  // rootRel 形如 ".<agent>/sessions"、".<agent>"（平铺）或 ".config/<x>/history"
   const parts = rootRel.split("/");
   const agentBase = parts[0]; // ".<agent>" / ".config" / ".local"
   if (agentBase === ".config" || agentBase === ".local") {
     const owner = parts[1] ?? "";
-    // owner 不带点也可疑（.local/share/opencode 这类通常带点或不带——宽松处理，靠采样验证兜底）
     return NOISE_DIR_BASES.has(owner.replace(/^\./, ""));
   }
+  // 噪声目录即使命中也排除（.npm/sessions 这类）；靠采样验证兜底漏网的。
   return NOISE_DIR_BASES.has(agentBase.replace(/^\./, "").split(".")[0]);
 }
 
-/** 目录名 → 展示名：.code-agent → Code Agent。 */
-export function displayNameOf(dirBase: string): string {
-  const cleaned = dirBase.replace(/^\./, "").replace(/[-_.]/g, " ").trim();
+/** 目录名 → 展示名：.code-agent/sessions → Code Agent；.codeagent → Codeagent。 */
+export function displayNameOf(rootRel: string): string {
+  const parts = rootRel.split("/");
+  // .config/<x>/… / .local/share/<x>/… 的主体是 <x>；其余取点目录本身。
+  const base = parts[0] === ".config" || parts[0] === ".local" ? parts[1] ?? parts[0] : parts[0];
+  const cleaned = base.replace(/^\./, "").replace(/[-_.]/g, " ").trim();
   if (!cleaned) return "Unknown Agent";
   return cleaned
     .split(/\s+/)
@@ -70,28 +77,47 @@ export function displayNameOf(dirBase: string): string {
 
 /** 主入口：在该 source 上做启发式发现（每个 source 只做一次，调用方缓存）。 */
 export async function discoverAgents(source: FileSource): Promise<DiscoveredAgent[]> {
-  if (typeof source.scanAgentStorage !== "function") return [];
-  let candidates: string[];
-  try {
-    candidates = await source.scanAgentStorage();
-  } catch {
-    return [];
+  const known = knownTerritories();
+
+  // ---- 腿 1：文件驱动（不依赖目录名）----
+  // rootRel → 采样文件 rel（null = 目录名驱动补的，还没采样）
+  const rootsFromFiles = new Map<string, string | null>();
+  if (typeof source.scanTranscriptFiles === "function") {
+    try {
+      for (const f of await source.scanTranscriptFiles()) {
+        const rootRel = extractTranscriptRoot(f.rel);
+        if (!rootRel || isNoise(rootRel)) continue;
+        if (known.has(rootRel.split("/").slice(0, -1).join("/"))) continue;
+        if (known.has(rootRel)) continue; // $HOME 平铺型根（.codeagent 本身）
+        // 聚合：一个根目录多个文件只记一次（首选活跃度最高的——扫描结果已按 mtime 降序）。
+        if (!rootsFromFiles.has(rootRel)) rootsFromFiles.set(rootRel, f.rel);
+      }
+    } catch {}
   }
 
-  const known = knownTerritories();
-  const out: DiscoveredAgent[] = [];
-  for (const rootRel of candidates) {
-    // 归一化：确保是 ~/.<x>/... 形式且不落在已知 agent 领地
-    if (!rootRel.startsWith(".")) continue;
-    if (known.has(rootRel.slice(0, rootRel.lastIndexOf("/")))) continue;
-    if (isNoise(rootRel)) continue;
+  // ---- 腿 2：目录名驱动（sessions/projects/history 约定名兜底）----
+  if (typeof source.scanAgentStorage === "function") {
+    try {
+      for (const rootRel of await source.scanAgentStorage()) {
+        if (!rootRel.startsWith(".")) continue;
+        const parent = rootRel.slice(0, rootRel.lastIndexOf("/"));
+        if (known.has(parent) || known.has(rootRel)) continue;
+        if (isNoise(rootRel)) continue;
+        if (!rootsFromFiles.has(rootRel)) rootsFromFiles.set(rootRel, null); // null = 待采样（腿 1 没覆盖到）
+      }
+    } catch {}
+  }
 
-    // 采样验证：找一个 jsonl/json 文件，读头部判定格式；三种都不认识 → 放弃。
-    const kind = await sampleKind(source, rootRel);
-    if (!kind) continue;
+  // ---- 验证与收录 ----
+  const out: DiscoveredAgent[] = [];
+  for (const [rootRel, sampleFile] of rootsFromFiles) {
+    const kind = sampleFile
+      ? await sampleKindOfFile(source, sampleFile)
+      : await sampleKind(source, rootRel);
+    if (!kind) continue; // 解析不出任何已知格式 → 宁可不显示
     out.push({
       id: encodeGenericId(kind, rootRel),
-      name: displayNameOf(rootRel.split("/")[rootRel.startsWith(".config") || rootRel.startsWith(".local") ? 1 : 0]),
+      name: displayNameOf(rootRel),
       kind,
       rootRel,
     });
@@ -99,7 +125,16 @@ export async function discoverAgents(source: FileSource): Promise<DiscoveredAgen
   return out;
 }
 
-/** 在候选目录里找一个 jsonl/json 采样判定风格。 */
+/** 直接读已知转录文件的首几 KB 判定格式（文件驱动路径用，零额外探测）。 */
+async function sampleKindOfFile(source: FileSource, rel: string): Promise<GenericKind | null> {
+  try {
+    return detectKind(await source.readHead(rel, 4096));
+  } catch {
+    return null;
+  }
+}
+
+/** 在候选目录里找一个 jsonl/json 采样判定风格（目录名驱动路径用）。 */
 async function sampleKind(source: FileSource, rootRel: string): Promise<GenericKind | null> {
   let entries;
   try {

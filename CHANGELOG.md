@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **File-driven agent discovery**: transcript files (`*.jsonl`/`*.json`) are
+  found directly under any home dot-directory — the container directory's
+  name no longer matters (`sessions`, `chats`, `runs`, or flat layouts all
+  work). Scanning prunes caches/build dirs, caps depth at 4 and file count at
+  2000, and prefers recently-modified files. SSH is a single `find` round trip;
+  the directory-name scan (`sessions`/`projects`/`history`) remains as a
+  fallback leg. Unknown layouts that still don't show up are usually stored
+  outside the home dot-directories or in an unrecognized format — see the
+  diagnostic in CONTRIBUTING.md.
 - **Heuristic agent discovery**: unknown agents that follow the common
   `~/.<agent>/sessions|projects|history` storage convention are auto-discovered
   on every machine (local, SSH, WSL) and rendered with a generic parser

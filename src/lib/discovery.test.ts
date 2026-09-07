@@ -82,6 +82,40 @@ describe("discoverAgents 启发式发现", () => {
     expect(found.find((f) => f.rootRel === ".codeagent/sessions")?.name).toBe("Codeagent");
   });
 
+  it("文件驱动：容器目录叫任意名字也能发现（chats/runs/平铺）", async () => {
+    const src = new FakeFileSource(HOME);
+    // 目录叫 chats —— 目录名扫描认不出，但文件驱动能
+    src.add(
+      ".codeagent/chats/run-0.jsonl",
+      [
+        JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, timestamp: "2026-09-01T00:00:00Z", uuid: "u" }),
+        JSON.stringify({ type: "assistant", message: { role: "assistant", content: "ok" }, timestamp: "2026-09-01T00:01:00Z", uuid: "a" }),
+      ].join("\n")
+    );
+    // 平铺：根目录直接放 jsonl
+    src.add(
+      ".flatagent/conv-1.jsonl",
+      [JSON.stringify({ role: "user", content: "q" }), JSON.stringify({ role: "assistant", content: "a" })].join("\n")
+    );
+    const found = await discoverAgents(src);
+    const roots = found.map((f) => f.rootRel);
+    expect(roots).toContain(".codeagent/chats");
+    expect(roots).toContain(".flatagent");
+  });
+
+  it("文件驱动发现的平铺根：列出 + 读取全链路", async () => {
+    const src = new FakeFileSource(HOME);
+    src.add(
+      ".flatagent/conv-1.jsonl",
+      [JSON.stringify({ role: "user", content: "q" }), JSON.stringify({ role: "assistant", content: "a" })].join("\n")
+    );
+    const sessions = await listGenericSessions(src, ".flatagent");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe("conv-1");
+    const msgs = await readGenericSession(src, "chat-style", ".flatagent", "conv-1");
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
   it("解析不出任何已知格式时不收录", async () => {
     const src = new FakeFileSource(HOME);
     src.add(".weird/sessions/x.jsonl", JSON.stringify({ unrelated: true }));

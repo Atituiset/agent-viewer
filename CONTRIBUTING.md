@@ -64,16 +64,26 @@ paste raw transcripts — they may contain secrets or private code.
 
 ### An agent is not detected
 
-Heuristic discovery covers unknown agents that follow the common
-`~/.<agent>/sessions|projects|history` layout with recognizable transcripts.
-If your agent doesn't show up, work through this checklist first — the most
+Heuristic discovery works in two layers:
+
+1. **File-driven (primary)**: the machine is scanned for `*.jsonl` / `*.json`
+   transcript files under home dot-directories (`~/.<x>/…`, `.config`, 
+   `.local/share`), and the enclosing directory becomes a session root — 
+   **the container directory's name doesn't matter** (`sessions`, `chats`,
+   `runs`, flat files at the root, anything). Candidates are validated by
+   sampling: a root is only shown if its files parse as a recognizable
+   transcript shape.
+2. **Directory-name-driven (fallback)**: directories named
+   `sessions`/`projects`/`history` are also probed directly.
+
+If your agent still doesn't show up, work through this checklist — the most
 common causes are at the top:
 
 | # | Check | How | Symptom |
 |---|-------|-----|---------|
 | 1 | **Wrong login user** | The machine entry in Agent Viewer must log in as the *same user* that runs the agent CLI (its sessions live under that user's `$HOME`). | Agent runs as `root`, you log in as someone else → nothing found |
 | 2 | **Connection failure** | A red error banner on the tools page means SSH/auth failed — fix that first. | "Connection Failed" + error text |
-| 3 | **Directory layout** | Run the diagnostic below — the session directory may not be named `sessions`/`projects`/`history`. | Empty tool list, no error |
+| 3 | **Storage outside home dot-dirs** | Agent data under `/opt`, `/var`, or a non-dot directory is not scanned. | Empty tool list, no error |
 | 4 | **File format** | Run the diagnostic below — transcripts must be `.jsonl`/`.json` in a recognizable shape. | Empty tool list, no error |
 
 Then run this diagnostic **on the target machine** (SSH into it, as the user

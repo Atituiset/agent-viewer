@@ -32,12 +32,12 @@ Known agents (first-class parsers):
 | Hermes | `~/.hermes/sessions` | JSONL |
 | Kimi Code | `~/.kimi-code/sessions` | JSONL |
 
-**Unknown agents are auto-discovered.** Most CLI agents follow the same storage
-convention — `~/.<agent>/sessions|projects|history` with JSONL/JSON transcripts.
-Agent Viewer scans `$HOME` (plus `.config` and `.local/share`) on every machine,
-samples candidate directories, and renders anything that parses as one of the
-common transcript shapes (Claude-style event stream, Codex-style rollout, or a
-plain chat dump). In-house CLIs just work — no code changes needed.
+**Unknown agents are auto-discovered.** Transcript files (`*.jsonl` / `*.json`)
+are located directly under any home dot-directory — the folder's name doesn't
+matter (`sessions`, `chats`, flat layouts all work). Candidate roots are
+validated by sampling: anything that parses as a Claude-style event stream,
+Codex-style rollout, or a plain chat dump is rendered. In-house CLIs just
+work — no code changes needed.
 
 If your agent follows a different layout or format, run the diagnostic
 one-liner from [CONTRIBUTING.md](CONTRIBUTING.md#an-agent-is-not-detected) and
