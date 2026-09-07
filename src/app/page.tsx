@@ -49,6 +49,15 @@ export default function Home() {
     toolMetaRef.current.get(toolId) ? session.projectPath : undefined, []);
 
   const loadTools = useCallback(async (machine: MachineConfig) => {
+    // 切换机器必须整体重置下游导航状态：否则旧机器的 tool/session id 残留，
+    // 面包屑显示错乱，LIVE 轮询甚至可能拿新机器 + 旧会话 id 去读数据。
+    setSelectedTool(null);
+    setSelectedSession(null);
+    setSessions([]);
+    setSessionsError(null);
+    setMessages([]);
+    setSessionError(null);
+    setLastStamp(undefined);
     setSelectedMachine(machine);
     setLoading(true);
     setToolsError(null);

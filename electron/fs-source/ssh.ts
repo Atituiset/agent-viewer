@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import type { FileSource, DirEntry, FileStat } from "./types";
-import { resolvePath } from "./util";
+import { resolvePath, TRANSCRIPT_PRUNE_DIRS } from "./util";
 import { verifyHostKey } from "./host-keys";
 
 export interface SshOptions {
@@ -163,8 +163,9 @@ export class SshFileSource implements FileSource {
     return resolvePath(this, p);
   }
 
-  /** 运行一条远程命令，返回 stdout；非 0 退出码或超时则 reject。 */
-  private async exec(cmd: string): Promise<string> {
+  /** 运行一条远程命令，返回 stdout；非 0 退出码或超时则 reject。
+   *  timeoutMs 可选：全 home 扫描这类重命令传更长预算（默认 30s）。 */
+  private async exec(cmd: string, timeoutMs = EXEC_TIMEOUT_MS): Promise<string> {
     const attempt = (): Promise<string> =>
       new Promise((res, rej) => {
         let out = "";
@@ -178,8 +179,8 @@ export class SshFileSource implements FileSource {
           }
         };
         const timer = setTimeout(
-          () => done(() => rej(new Error(`remote command timed out after ${EXEC_TIMEOUT_MS}ms: ${cmd.slice(0, 80)}`))),
-          EXEC_TIMEOUT_MS
+          () => done(() => rej(new Error(`remote command timed out after ${timeoutMs}ms: ${cmd.slice(0, 80)}`))),
+          timeoutMs
         );
         this.client.exec(cmd, (e, stream) => {
           if (e) return done(() => rej(e));
@@ -318,27 +319,32 @@ export class SshFileSource implements FileSource {
 
   /**
    * 文件驱动的发现（不依赖容器目录名）：一条 find 直接按扩展名找转录文件，
-   * 输出 <mtime>\t<path>，本地反推 agent 根目录。剪枝在 find -prune 里做，
-   * 单 RTT。失败返回 []（该 source 只剩目录名扫描那条腿）。
+   * 输出 <mtime>\t<path>，本地反推 agent 根目录。剪枝在 find -prune 里做，单 RTT。
+   *
+   * 性能红线：这条命令跑在用户的整个 $HOME 上，必须快——
+   * - maxdepth 5（extractTranscriptRoot 只认 ≤4 段路径，再深必属无效）；
+   * - 剪枝表与 local 扫描共享（缓存/包管理器/构建目录全跳过）；
+   * - 服务端 sort + head 截断，最多回传 2000 条。
+   * 否则大 home（几十 GB 缓存）会在 30s exec 超时里死掉，SSH 端将永远发现不了。
    */
   async scanTranscriptFiles(): Promise<Array<{ rel: string; mtime: number }>> {
     try {
       const home = this.abs(".");
       const homeNorm = home.endsWith("/") ? home.slice(0, -1) : home;
-      const prune = [
-        "node_modules", ".git", ".cache", ".npm", ".cargo", ".rustup", ".m2", ".gradle",
-        ".docker", ".vscode-server", "target", "vendor",
-      ]
-        .map((d) => `-name ${this.sh(d)} -o`)
+      const prune = Array.from(TRANSCRIPT_PRUNE_DIRS)
+        .map((d) => `-name ${this.sh(d)}`)
+        .join(" -o ");
+      const roots = [home, ".config", ".local/share", ".local/state"]
+        .map((r) => this.sh(r === home ? r : path.posix.join(home, r)))
         .join(" ");
-      // 三个点目录领地 + 限制深度；%T@ = mtime(epoch 小数)
       const cmd = [
-        `find ${this.sh(home)} ${this.sh(path.posix.join(home, ".config"))} ${this.sh(path.posix.join(home, ".local/share"))} ${this.sh(path.posix.join(home, ".local/state"))}`,
-        `\\( ${prune} -false \\) -prune -o`,
+        `find ${roots} -maxdepth 5`,
+        `\\( ${prune} \\) -prune -o`,
         "-type f \\( -name '*.jsonl' -o -name '*.json' \\)",
         "-printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -2000",
       ].join(" ");
-      const out = await this.exec(cmd);
+      // 全 home 扫描：剪枝后仍可能在大机器上耗时，给 60s 预算（普通命令仍 30s）。
+      const out = await this.exec(cmd, 60_000);
       const files: Array<{ rel: string; mtime: number }> = [];
       for (const line of out.split("\n")) {
         const tab = line.indexOf("\t");
@@ -349,7 +355,9 @@ export class SshFileSource implements FileSource {
         files.push({ rel: p.slice(homeNorm.length + 1), mtime });
       }
       return files;
-    } catch {
+    } catch (e) {
+      // 不静默：SSH 端发现失效时最常见的根因（find 缺失/超时/家目录不可读）必须能从日志看到。
+      console.error("[ssh] scanTranscriptFiles failed:", e);
       return [];
     }
   }

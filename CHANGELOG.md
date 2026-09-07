@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Switching machines no longer leaves the previous machine's tool/session
+  breadcrumb (and stale selection) behind; downstream navigation state is
+  fully reset on machine switch, which also stops LIVE polling from
+  reading the old session against the new machine.
+- SSH heuristic scan: the full-home `find` now gets a 60s budget (was the
+  generic 30s exec timeout — large homes could silently time out and the
+  machine showed no discovered agents), shared prune list with local scan,
+  depth cap, and scan failures are logged instead of silently swallowed.
+
 ## [0.5.0] - 2026-09-07
 
 ## [0.4.0] - 2026-09-07
