@@ -66,14 +66,30 @@ paste raw transcripts — they may contain secrets or private code.
 
 Heuristic discovery covers unknown agents that follow the common
 `~/.<agent>/sessions|projects|history` layout with recognizable transcripts.
-If your agent doesn't show up, SSH into that machine and run this one-liner —
-it reports where the sessions live and what the files look like:
+If your agent doesn't show up, work through this checklist first — the most
+common causes are at the top:
+
+| # | Check | How | Symptom |
+|---|-------|-----|---------|
+| 1 | **Wrong login user** | The machine entry in Agent Viewer must log in as the *same user* that runs the agent CLI (its sessions live under that user's `$HOME`). | Agent runs as `root`, you log in as someone else → nothing found |
+| 2 | **Connection failure** | A red error banner on the tools page means SSH/auth failed — fix that first. | "Connection Failed" + error text |
+| 3 | **Directory layout** | Run the diagnostic below — the session directory may not be named `sessions`/`projects`/`history`. | Empty tool list, no error |
+| 4 | **File format** | Run the diagnostic below — transcripts must be `.jsonl`/`.json` in a recognizable shape. | Empty tool list, no error |
+
+Then run this diagnostic **on the target machine** (SSH into it, as the user
+from check #1). Set `DIR` to the agent's directory — `$HOME/.<agent>` if it
+runs under your user, or an absolute path like `/root/.codeagent` if it runs
+as another user:
 
 ```bash
-find ~ -maxdepth 4 \( -iname '*<your-agent>*' -o -type d \( -name sessions -o -name projects -o -name history \) \) 2>/dev/null | grep -viE '\.claude|\.codex|\.opencode|\.deepseek|\.gemini|\.hermes|\.kimi' ; echo '---'; find ~ -maxdepth 4 -name '*.jsonl' -path '*<your-agent>*' 2>/dev/null | head -3 | xargs -r -I{} sh -c 'echo "== {}"; head -c 600 "{}"'
+DIR="$HOME/.codeagent"   # ← 换成你的 agent 目录；root 跑的用 /root/.codeagent
+echo "== contents =="; ls -la "$DIR" 2>/dev/null
+echo "== jsonl/json files =="; find "$DIR" -maxdepth 4 -type f \( -name '*.jsonl' -o -name '*.json' \) 2>/dev/null | head -15
+echo "== sample =="; find "$DIR" -maxdepth 4 -type f \( -name '*.jsonl' -o -name '*.json' \) 2>/dev/null | head -1 | xargs -r -I{} sh -c 'echo "== {}"; head -c 600 "{}"'
 ```
 
-Replace `<your-agent>` with the CLI's directory/keyword (e.g. `codeagent`).
 Include the output (redact anything sensitive) in your issue — it answers both
 questions needed to add support: **where** the sessions are stored and **what
-format** the transcripts use.
+format** the transcripts use. Recognized transcript shapes are Claude-style
+(`{"type":"user","message":…}`), Codex-style (`{"type":"response_item",…}`),
+and plain chat dumps (`{"role":"user","content":…}`).
