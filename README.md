@@ -20,6 +20,8 @@ AI coding agents accumulate sessions in `~/.claude`, `~/.codex`, sqlite database
 
 ## Supported agents
 
+Known agents (first-class parsers):
+
 | Agent | Storage | Format |
 |---|---|---|
 | Claude Code | `~/.claude/projects` | JSONL |
@@ -30,7 +32,16 @@ AI coding agents accumulate sessions in `~/.claude`, `~/.codex`, sqlite database
 | Hermes | `~/.hermes/sessions` | JSONL |
 | Kimi Code | `~/.kimi-code/sessions` | JSONL |
 
-Adding a new agent is two steps: write `src/lib/<tool>.ts` (list/read), then add one entry to the registry (`src/lib/registry.ts`).
+**Unknown agents are auto-discovered.** Most CLI agents follow the same storage
+convention — `~/.<agent>/sessions|projects|history` with JSONL/JSON transcripts.
+Agent Viewer scans `$HOME` (plus `.config` and `.local/share`) on every machine,
+samples candidate directories, and renders anything that parses as one of the
+common transcript shapes (Claude-style event stream, Codex-style rollout, or a
+plain chat dump). In-house CLIs just work — no code changes needed.
+
+Adding a first-class parser (better titles, metadata, tool-call pairing for a
+specific dialect) is two steps: write `src/lib/<tool>.ts` (list/read), then add
+one entry to the registry (`src/lib/registry.ts`).
 
 ## Machines
 

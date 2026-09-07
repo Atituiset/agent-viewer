@@ -1,6 +1,8 @@
 import path from "path";
 import type { FileSource, DirEntry, FileStat } from "./types";
 
+const SCAN_DIR_NAMES = ["sessions", "projects", "history"];
+
 export class FakeFileSource implements FileSource {
   readonly kind = "local" as const;
   readonly home: string;
@@ -75,5 +77,25 @@ export class FakeFileSource implements FileSource {
     const b = this.files.get(this.resolve(p));
     if (!b) throw new Error("not found: " + p);
     return b.toString("utf-8").split("\n").filter((l) => l.trim()).length;
+  }
+
+  /** 测试用：与 LocalFileSource 同语义——home 下（含 .config/.local/share）
+   *  任何文件以 ~/<x>/<sessions|projects|history>/ 为前缀即认定该目录存在。 */
+  async scanAgentStorage(): Promise<string[]> {
+    const out = new Set<string>();
+    const prefixes = ["", ".config/", ".local/share/"];
+    for (const key of this.files.keys()) {
+      const rel = key.startsWith(this.home + "/") ? key.slice(this.home.length + 1) : null;
+      if (!rel || !rel.startsWith(".")) continue;
+      for (const p of prefixes) {
+        if (!rel.startsWith(p)) continue;
+        const rest = rel.slice(p.length); // ".<agent>/sessions/..." 或 ".<agent>/<other>/..."
+        const parts = rest.split("/");
+        if (parts.length >= 2 && SCAN_DIR_NAMES.includes(parts[1])) {
+          out.add(p + parts[0] + "/" + parts[1]);
+        }
+      }
+    }
+    return Array.from(out);
   }
 }

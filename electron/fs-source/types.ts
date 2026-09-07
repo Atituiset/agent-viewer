@@ -27,5 +27,11 @@ export interface FileSource {
   lineCount(p: string): Promise<number>;
   /** 本地 source 返回绝对路径（sqlite 直接打开用，避免整库拷贝）；远程 source 不实现。 */
   localPath?(p: string): string;
+  /**
+   * 启发式 agent 发现用：扫描 $HOME 下的候选会话目录（sessions/projects/history 等），
+   * 返回相对 home 的目录列表。SSH source 用单条 find 实现（1 个 RTT），本地用 readdir。
+   * 未实现则该 source 不参与启发式发现。
+   */
+  scanAgentStorage?(): Promise<string[]>;
   dispose?(): Promise<void>;
 }

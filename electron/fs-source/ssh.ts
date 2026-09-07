@@ -288,6 +288,34 @@ export class SshFileSource implements FileSource {
     return { mtime, birthtime };
   }
 
+  /**
+   * 启发式 agent 发现的扫描：一条 GNU find 拿回 $HOME（含 .config/.local/share）下
+   * 全部 sessions/projects/history 目录，单 RTT——逐目录 readDir 会是 N 个 RTT。
+   * 输出绝对路径，本地按 home 前缀裁成相对路径。find 不可用/失败返回 []，
+   * 该 source 不参与启发式发现（只显示已知注册表里的 agent）。
+   */
+  async scanAgentStorage(): Promise<string[]> {
+    try {
+      const home = this.abs(".");
+      const homeNorm = home.endsWith("/") ? home.slice(0, -1) : home;
+      const cmd = [
+        `find ${this.sh(home)} ${this.sh(path.posix.join(home, ".config"))} ${this.sh(path.posix.join(home, ".local/share"))}`,
+        "-mindepth 2 -maxdepth 2 -type d",
+        `\\( -name sessions -o -name projects -o -name history \\) -printf '%p\\n'`,
+      ].join(" ");
+      const out = await this.exec(cmd);
+      const rel: string[] = [];
+      for (const line of out.split("\n")) {
+        const p = line.trim();
+        if (!p || !p.startsWith(homeNorm + "/")) continue;
+        rel.push(p.slice(homeNorm.length + 1));
+      }
+      return rel;
+    } catch {
+      return [];
+    }
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
     try {

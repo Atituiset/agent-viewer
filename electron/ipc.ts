@@ -60,8 +60,27 @@ async function sessionStamp(
     case "gemini":
       fileRel = join(".gemini/antigravity-cli", "brain", sessionId, ".system_generated", "logs", "transcript.jsonl");
       break;
-    default:
-      return null; // opencode(sqlite)、hermes(dump 轮转)：回退直接刷新
+    default: {
+      if (toolId.startsWith("generic:")) {
+        // 启发式发现的 agent：id = generic:<kind>:<rootRel>，sessionId 是 root 下的相对路径。
+        const m = /^generic:(?:[^:]+):(.+)$/.exec(toolId);
+        if (m) {
+          const rootRel = decodeURIComponent(m[1]);
+          const base = sessionId.startsWith("/") ? null : join(rootRel, sessionId);
+          const hasExt = /\.(jsonl|json)$/i.test(sessionId);
+          const candidates = base ? (hasExt ? [base] : [base + ".jsonl", base + ".json"]) : [];
+          for (const c of candidates) {
+            if (await src.exists(c)) {
+              fileRel = c;
+              break;
+            }
+          }
+        }
+      } else {
+        return null; // opencode(sqlite)、hermes(dump 轮转)：回退直接刷新
+      }
+      break;
+    }
   }
   if (!fileRel || !(await src.exists(fileRel))) return null;
   try {

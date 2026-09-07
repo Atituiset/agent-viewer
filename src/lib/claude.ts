@@ -63,7 +63,7 @@ export async function readClaudeSession(
   const fileRel = join(ROOT, projectPath, `${sessionId}.jsonl`);
   if (!(await source.exists(fileRel))) return [];
 
-  const messages = parseSessionFile(await source.readFile(fileRel));
+  const messages = parseClaudeTranscript(await source.readFile(fileRel));
 
   // Task 工具 spawn 的 subagent 转录在 <sessionId>/subagents/agent-<id>.jsonl，
   // 行格式与主文件相同；agentId 从文件名取，显示名从同名 .meta.json 取。
@@ -82,7 +82,7 @@ export async function readClaudeSession(
       const agentId = match[1];
       try {
         const agentLabel = await readAgentLabel(source, join(subagentsDir, `agent-${agentId}.meta.json`), agentId);
-        const sub = parseSessionFile(await source.readFile(join(subagentsDir, entry.name)));
+        const sub = parseClaudeTranscript(await source.readFile(join(subagentsDir, entry.name)));
         for (const msg of sub) {
           msg.agent = agentId;
           msg.agentLabel = agentLabel;
@@ -107,8 +107,9 @@ async function readAgentLabel(source: FileSource, metaRel: string, agentId: stri
   return `agent-${agentId}`;
 }
 
-/** 解析单个 jsonl 转录文件（主会话与 subagent 转录格式一致），并配对 tool_result。 */
-function parseSessionFile(content: string): ConversationMessage[] {
+/** 解析单个 jsonl 转录文件（主会话与 subagent 转录格式一致），并配对 tool_result。
+ *  纯函数：供 claude 本体与启发式发现的未知 agent（claude 形转录）共用。 */
+export function parseClaudeTranscript(content: string): ConversationMessage[] {
   const messages: ConversationMessage[] = [];
   const toolResults: Array<{ toolUseId: string; output: string }> = [];
   const lines = content.split("\n");

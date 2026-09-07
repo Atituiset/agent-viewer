@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Heuristic agent discovery**: unknown agents that follow the common
+  `~/.<agent>/sessions|projects|history` storage convention are auto-discovered
+  on every machine (local, SSH, WSL) and rendered with a generic parser
+  (Claude-style / Codex-style / plain-chat transcripts). In-house CLIs no
+  longer need first-class support to show up. SSH scanning is a single
+  `find` round trip; candidates are validated by sampling before display.
 - i18n: all UI strings centralized in `src/components/i18n.ts` with English and
   Chinese dictionaries; language toggle in the nav bar (persisted).
 - Component test infrastructure (@testing-library + jsdom) with tests for

@@ -78,6 +78,14 @@ export async function readCodexSession(source: FileSource, sessionId: string): P
   );
   if (!hit) return [];
 
+  return parseCodexTranscript(await source.readFile(hit.rel));
+}
+
+/**
+ * 解析 codex 风格的 jsonl 转录（rollout 事件流：response_item / 旧扁平格式）。
+ * 纯函数：内容 → 消息列表，供 codex 与启发式发现的未知 agent 共用。
+ */
+export function parseCodexTranscript(content: string): ConversationMessage[] {
   const messages: ConversationMessage[] = [];
   // 与 kimi 同一口径：assistant 侧按事件流累积，遇到下一条 user 消息或文件结束时 flush。
   let bufText = "";
@@ -112,7 +120,7 @@ export async function readCodexSession(source: FileSource, sessionId: string): P
     }
   };
 
-  const lines = (await source.readFile(hit.rel)).split("\n");
+  const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     try {

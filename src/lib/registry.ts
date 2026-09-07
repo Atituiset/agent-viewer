@@ -7,6 +7,8 @@ import { listGeminiSessions, readGeminiSession } from "./gemini";
 import { listDeepSeekSessions, readDeepSeekSession } from "./deepseek";
 import { listHermesSessions, readHermesSession } from "./hermes";
 import { listKimiSessions, readKimiSession } from "./kimi";
+import { decodeGenericId, listGenericSessions, readGenericSession } from "./generic";
+import { discoverAgents } from "./discovery";
 
 /**
  * Agent 工具注册表——加一个新 agent 只需：
@@ -111,13 +113,31 @@ export const TOOLS: ToolEntry[] = [
 
 export function getTool(toolId: string): ToolEntry {
   const tool = TOOLS.find((t) => t.id === toolId);
-  if (!tool) throw new Error("unknown tool: " + toolId);
-  return tool;
+  if (tool) return tool;
+  // 启发式发现的动态条目：id 编码了格式与根目录，无状态解码出等价 ToolEntry。
+  const gen = decodeGenericId(toolId);
+  if (gen) {
+    const rootRel = gen.rootRel;
+    return {
+      id: toolId,
+      name: toolId,
+      icon: "✨",
+      color: "#a78bfa",
+      description: `Discovered agent — ${rootRel}`,
+      detectPaths: [rootRel],
+      listSessions: (source) => listGenericSessions(source, rootRel),
+      readSession: (source, sessionId) => readGenericSession(source, gen.kind, rootRel, sessionId),
+    };
+  }
+  throw new Error("unknown tool: " + toolId);
 }
 
-/** 检测所有已安装的工具并统计会话数（全并行）。 */
+/** 检测所有已安装的工具并统计会话数（全并行）。
+ *  已知 agent 走固定 detectPaths；另做一轮启发式发现，接住不在名单里、
+ *  但遵循 ~/.<agent>/sessions|projects|history 布局的 agent（内部 CLI、新 agent）。
+ *  两条腿互不干扰：发现失败只影响发现条目。 */
 export async function detectTools(source: FileSource): Promise<DetectedTool[]> {
-  const out = await Promise.all(
+  const known = await Promise.all(
     TOOLS.map(async (tool): Promise<DetectedTool> => {
       const detected = await Promise.any(
         tool.detectPaths.map((p) =>
@@ -148,5 +168,33 @@ export async function detectTools(source: FileSource): Promise<DetectedTool[]> {
       };
     })
   );
-  return out.filter((t) => t.detected);
+
+  // 启发式发现：未知 agent（容错——失败就是少几个，不影响已知条目）。
+  let discovered: DetectedTool[] = [];
+  try {
+    const agents = await discoverAgents(source);
+    discovered = await Promise.all(
+      agents.map(async (d) => {
+        let sessionCount = 0;
+        try {
+          sessionCount = (await listGenericSessions(source, d.rootRel)).length;
+        } catch (e) {
+          console.error(`[discover] ${d.rootRel} listSessions failed:`, e);
+        }
+        return {
+          id: d.id,
+          name: d.name,
+          icon: "✨",
+          color: "#a78bfa",
+          description: `Discovered agent (${d.kind}) — ${d.rootRel}`,
+          sessionCount,
+          detected: true,
+        };
+      })
+    );
+  } catch (e) {
+    console.error("[discover] heuristic discovery failed:", e);
+  }
+
+  return [...known.filter((t) => t.detected), ...discovered];
 }
