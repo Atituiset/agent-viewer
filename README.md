@@ -39,6 +39,10 @@ samples candidate directories, and renders anything that parses as one of the
 common transcript shapes (Claude-style event stream, Codex-style rollout, or a
 plain chat dump). In-house CLIs just work — no code changes needed.
 
+If your agent follows a different layout or format, run the diagnostic
+one-liner from [CONTRIBUTING.md](CONTRIBUTING.md#an-agent-is-not-detected) and
+open an issue with the output.
+
 Adding a first-class parser (better titles, metadata, tool-call pairing for a
 specific dialect) is two steps: write `src/lib/<tool>.ts` (list/read), then add
 one entry to the registry (`src/lib/registry.ts`).

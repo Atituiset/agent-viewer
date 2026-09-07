@@ -61,3 +61,19 @@ Parser ground rules:
 Open an issue with: agent tool + version, machine type (local/SSH/WSL), and if
 possible a **redacted** excerpt of the session file that fails to parse. Please don't
 paste raw transcripts — they may contain secrets or private code.
+
+### An agent is not detected
+
+Heuristic discovery covers unknown agents that follow the common
+`~/.<agent>/sessions|projects|history` layout with recognizable transcripts.
+If your agent doesn't show up, SSH into that machine and run this one-liner —
+it reports where the sessions live and what the files look like:
+
+```bash
+find ~ -maxdepth 4 \( -iname '*<your-agent>*' -o -type d \( -name sessions -o -name projects -o -name history \) \) 2>/dev/null | grep -viE '\.claude|\.codex|\.opencode|\.deepseek|\.gemini|\.hermes|\.kimi' ; echo '---'; find ~ -maxdepth 4 -name '*.jsonl' -path '*<your-agent>*' 2>/dev/null | head -3 | xargs -r -I{} sh -c 'echo "== {}"; head -c 600 "{}"'
+```
+
+Replace `<your-agent>` with the CLI's directory/keyword (e.g. `codeagent`).
+Include the output (redact anything sensitive) in your issue — it answers both
+questions needed to add support: **where** the sessions are stored and **what
+format** the transcripts use.
