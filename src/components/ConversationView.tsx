@@ -23,17 +23,24 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
   const [density, setDensity] = useState<"compact" | "full">("compact");
   const compact = density === "compact";
 
+  // 搜索 haystack 预计算：每条消息只 lower 一次，不随搜索词变化重复做
+  // （大会话内容几 MB，每次按键全量 toLowerCase 会卡输入）。
+  const haystacks = useMemo(
+    () =>
+      messages.map((msg) => {
+        const parts = [msg.role, msg.content];
+        if (msg.thinking) parts.push(msg.thinking);
+        if (msg.toolCalls) parts.push(msg.toolCalls.map((tc) => tc.name).join(" "));
+        return parts.join("\n").toLowerCase();
+      }),
+    [messages]
+  );
+
   const filtered = useMemo(() => {
     if (!search) return messages;
     const q = search.toLowerCase();
-    return messages.filter((msg) => {
-      if (msg.role.toLowerCase().includes(q)) return true;
-      if (msg.content.toLowerCase().includes(q)) return true;
-      if (msg.thinking && msg.thinking.toLowerCase().includes(q)) return true;
-      if (msg.toolCalls?.some((tc) => tc.name.toLowerCase().includes(q))) return true;
-      return false;
-    });
-  }, [messages, search]);
+    return messages.filter((_, i) => haystacks[i].includes(q));
+  }, [messages, search, haystacks]);
 
   const currentSessionId = sessionMeta?.id ?? null;
   useEffect(() => {

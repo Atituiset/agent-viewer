@@ -115,46 +115,61 @@ function sessionFileId(rootRel: string, relPath: string): string {
  * 列出某个发现到的 agent 目录下的会话。
  * 只扫一层子目录 + 根下直接放的 jsonl/json 文件——市面 agent 的 sessions 目录
  * 要么平铺文件，要么一层日期/project 子目录，不做更深递归（SSH 下太贵）。
+ * 全并行采集（目录/文件间 + 单文件 stat/head/lineCount 同时发起）。
  */
 export async function listGenericSessions(source: FileSource, rootRel: string): Promise<ToolSession[]> {
-  const out: ToolSession[] = [];
   let entries;
   try {
     entries = await source.readDir(rootRel);
   } catch {
     return [];
   }
+  // 全并行：子目录间/文件间并行，单文件 stat/head/lineCount 同时发起。
+  const jobs: Array<Promise<Array<ToolSession | null>>> = [];
   for (const e of entries) {
     if (e.isDirectory) {
-      let sub;
-      try {
-        sub = await source.readDir(join(rootRel, e.name));
-      } catch {
-        continue;
-      }
-      for (const f of sub) {
-        if (f.isDirectory || !/\.(jsonl|json)$/i.test(f.name)) continue;
-        await pushSession(source, out, rootRel, join(rootRel, e.name, f.name));
-      }
+      jobs.push(
+        (async (): Promise<Array<ToolSession | null>> => {
+          let sub;
+          try {
+            sub = await source.readDir(join(rootRel, e.name));
+          } catch {
+            return [];
+          }
+          return Promise.all(
+            sub
+              .filter((f) => !f.isDirectory && /\.(jsonl|json)$/i.test(f.name))
+              .map((f) => pushSession(source, rootRel, join(rootRel, e.name, f.name)))
+          );
+        })()
+      );
     } else if (/\.(jsonl|json)$/i.test(e.name)) {
-      await pushSession(source, out, rootRel, join(rootRel, e.name));
+      jobs.push(Promise.all([pushSession(source, rootRel, join(rootRel, e.name))]));
     }
   }
-  return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const sessions = (await Promise.all(jobs)).flat().filter((s): s is ToolSession => !!s);
+  return sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-async function pushSession(source: FileSource, out: ToolSession[], rootRel: string, relPath: string): Promise<void> {
+async function pushSession(
+  source: FileSource,
+  rootRel: string,
+  relPath: string
+): Promise<ToolSession | null> {
   try {
-    const stat = await source.stat(relPath);
-    const head = await source.readHead(relPath, 4096);
-    out.push({
+    const [stat, head, messageCount] = await Promise.all([
+      source.stat(relPath),
+      source.readHead(relPath, 4096),
+      source.lineCount(relPath),
+    ]);
+    return {
       id: sessionFileId(rootRel, relPath),
       title: titleFromHead(head) || sessionFileId(rootRel, relPath),
       createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
-      messageCount: await source.lineCount(relPath),
-    });
+      messageCount,
+    };
   } catch {
-    // 单个文件坏/不可读：跳过，不让整个 agent 的列表失败。
+    return null; // 单个文件坏/不可读：跳过，不让整个 agent 的列表失败。
   }
 }
 

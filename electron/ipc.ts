@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
-import { loadMachines, addMachine, removeMachine } from "../src/lib/machines";
+import { loadMachinesCached as loadMachines, addMachine, removeMachine } from "../src/lib/machines";
 import { detectTools, getTool, TOOLS } from "../src/lib/detect";
+import { findCodexSessionFile } from "../src/lib/codex";
 import { join } from "../electron/fs-source/util";
 import type { DetectedTool, MachineConfig } from "../src/lib/types";
 import { getSources, disposeSource } from "./source-manager";
@@ -43,9 +44,8 @@ async function sessionStamp(
       if (projectPath) fileRel = join(".claude/projects", projectPath, `${sessionId}.jsonl`);
       break;
     case "codex": {
-      // codex 文件在日期子目录里：walk 找到目标。
-      const found = await findCodexFile(src, sessionId);
-      fileRel = found;
+      // codex 文件在日期子目录里：walk 找到目标（带按 source 缓存，LIVE 轮询不重复全树找）。
+      fileRel = await findCodexSessionFile(src, sessionId);
       break;
     }
     case "deepseek":
@@ -82,29 +82,15 @@ async function sessionStamp(
       break;
     }
   }
-  if (!fileRel || !(await src.exists(fileRel))) return null;
+  // stat 本身会因文件缺失而失败（exists+stat 是两次往返，SSH 下白费一个 RTT）——
+  // 直接 stat、失败按「无指纹」处理；deepseek 的存在性预检保留了（后面还要 readDir）。
+  if (!fileRel) return null;
   try {
     const st = await src.stat(fileRel);
     return `${st.mtime.getTime()}`;
   } catch {
     return null;
   }
-}
-
-async function findCodexFile(src: FileSourceLike, sessionId: string): Promise<string | null> {
-  const walk = async (dir: string): Promise<string | null> => {
-    for (const e of await src.readDir(dir)) {
-      const rel = join(dir, e.name);
-      if (e.isDirectory) {
-        const hit = await walk(rel);
-        if (hit) return hit;
-      } else if (e.name === `${sessionId}.jsonl` || e.name.includes(sessionId)) {
-        return rel;
-      }
-    }
-    return null;
-  };
-  return walk(".codex/sessions");
 }
 
 type FileSourceLike = import("./fs-source/types").FileSource;

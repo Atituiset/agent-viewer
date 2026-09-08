@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { FakeFileSource } from "../../electron/fs-source/fake";
-import { listCodexSessions, readCodexSession } from "./codex";
+import { listCodexSessions, readCodexSession, countCodexSessions, findCodexSessionFile } from "./codex";
 
 const L1 = JSON.stringify({ type: "message", payload: { role: "user", content: "hi" }, timestamp: "2026-01-01T00:00:00Z" });
 const L2 = JSON.stringify({ type: "message", payload: { role: "assistant", content: "yo" }, timestamp: "2026-01-01T00:00:01Z" });
@@ -113,5 +113,26 @@ describe("codex parser", () => {
     const msgs = await readCodexSession(src, "rollout-bad");
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe("hi");
+  });
+
+  it("findCodexSessionFile 定位嵌套文件并按 source 缓存", async () => {
+    const src = new FakeFileSource().add(".codex/sessions/2026/01/01/rollout-cache.jsonl", [L1, L2].join("\n") + "\n");
+    const first = await findCodexSessionFile(src, "rollout-cache");
+    expect(first).toBe(".codex/sessions/2026/01/01/rollout-cache.jsonl");
+    // 缓存命中：删掉底层文件再找，仍返回旧路径（ LIVE 轮询语义：文件移动前保持可用）。
+    const again = await findCodexSessionFile(src, "rollout-cache");
+    expect(again).toBe(first);
+    // 未命中的 id 不缓存，返回 null。
+    expect(await findCodexSessionFile(src, "nope")).toBeNull();
+  });
+
+  it("countCodexSessions 只数 .jsonl，跨任意深度目录", async () => {
+    const src = new FakeFileSource()
+      .add(".codex/sessions/2026/01/01/a.jsonl", L1)
+      .add(".codex/sessions/2026/02/b.jsonl", L1)
+      .add(".codex/sessions/c.jsonl", L1)
+      .add(".codex/sessions/notes.txt", "x");
+    expect(await countCodexSessions(src)).toBe(3);
+    expect(await countCodexSessions(new FakeFileSource())).toBe(0);
   });
 });

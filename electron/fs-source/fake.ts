@@ -33,6 +33,11 @@ export class FakeFileSource implements FileSource {
     return false;
   }
 
+  /** 与 SSH source 同语义的批量探测（fake 下逐个探，验证调用方逻辑用）。 */
+  async existsBatch(paths: string[]): Promise<boolean[]> {
+    return Promise.all(paths.map((p) => this.exists(p)));
+  }
+
   async readDir(p: string): Promise<DirEntry[]> {
     const dir = this.resolve(p);
     const dirPrefix = dir.endsWith("/") ? dir : dir + "/";

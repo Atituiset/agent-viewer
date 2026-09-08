@@ -5,42 +5,75 @@ import { pairToolOutputInMessages } from "./tool-pairing";
 
 const ROOT = ".claude/projects";
 
+/** detect 卡片用的轻量计数：readDir 数各 project 目录下的 .jsonl 文件名，不 stat/不读文件。
+ *  旧口径是 listSessions().length——SSH 下等于为卡片上的数字把所有文件 stat+readHead+lineCount 拉一遍。 */
+export async function countClaudeSessions(source: FileSource): Promise<number> {
+  if (!(await source.exists(ROOT))) return 0;
+  let entries: DirEntry[];
+  try {
+    entries = await source.readDir(ROOT);
+  } catch {
+    return 0;
+  }
+  // project 目录间并行。
+  const counts = await Promise.all(
+    entries
+      .filter((e) => e.isDirectory)
+      .map((e) => source.readDir(join(ROOT, e.name)).catch(() => [] as DirEntry[]))
+  );
+  return counts.reduce((n, files) => n + files.filter((f) => f.name.endsWith(".jsonl")).length, 0);
+}
+
 export async function listClaudeSessionsAll(source: FileSource): Promise<ToolSession[]> {
   if (!(await source.exists(ROOT))) return [];
-  const result: ToolSession[] = [];
   const entries = await source.readDir(ROOT);
 
-  for (const entry of entries) {
-    if (!entry.isDirectory) continue;
-    const dirRel = join(ROOT, entry.name);
-    const projectName = entry.name.replace(/^-/, "").replace(/-/g, "/").replace(/^home\/[^/]+\//, "~/");
+  // 全并行：项目目录间并行、目录内文件间并行、单文件的 stat/head/lineCount 也同时发起。
+  // SSH 场景下旧实现是 3×RTT×文件数串行，这里是几批并发。
+  const perDir = await Promise.all(
+    entries
+      .filter((e) => e.isDirectory)
+      .map(async (entry): Promise<ToolSession[]> => {
+        const dirRel = join(ROOT, entry.name);
+        const projectName = entry.name.replace(/^-/, "").replace(/-/g, "/").replace(/^home\/[^/]+\//, "~/");
+        let files;
+        try {
+          files = await source.readDir(dirRel);
+        } catch {
+          return []; // 单个 project 目录不可读不该归零整个工具
+        }
+        const sessions = await Promise.all(
+          files
+            .filter((f) => f.name.endsWith(".jsonl"))
+            .map(async (f): Promise<ToolSession | null> => {
+              const fileRel = join(dirRel, f.name);
+              try {
+                const [stat, head, messageCount] = await Promise.all([
+                  source.stat(fileRel),
+                  // 只读前 8KB 取标题；行数走流式 lineCount——都不整文件拉回。
+                  source.readHead(fileRel, 8192),
+                  source.lineCount(fileRel),
+                ]);
+                return {
+                  id: f.name.replace(".jsonl", ""),
+                  title: extractClaudeTitle(head),
+                  createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
+                  messageCount,
+                  project: projectName,
+                  projectPath: entry.name,
+                };
+              } catch {
+                return null;
+              }
+            })
+        );
+        return sessions.filter((s): s is ToolSession => !!s);
+      })
+  );
 
-    let files;
-    try {
-      files = await source.readDir(dirRel);
-    } catch {
-      continue; // 单个 project 目录不可读不该归零整个工具
-    }
-    for (const f of files) {
-      if (!f.name.endsWith(".jsonl")) continue;
-      const fileRel = join(dirRel, f.name);
-      try {
-        const stat = await source.stat(fileRel);
-        // 只读前 8KB 取标题，行数用 lineCount——不把整个 jsonl 拉回来。
-        const head = await source.readHead(fileRel, 8192);
-        result.push({
-          id: f.name.replace(".jsonl", ""),
-          title: extractClaudeTitle(head),
-          createdAt: (stat.birthtime ?? stat.mtime).toISOString(),
-          messageCount: await source.lineCount(fileRel),
-          project: projectName,
-          projectPath: entry.name,
-        });
-      } catch {}
-    }
-  }
-
-  return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return perDir
+    .flat()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function extractClaudeTitle(content: string): string {

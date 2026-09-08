@@ -60,17 +60,12 @@ export async function getSources(machine: MachineConfig): Promise<FileSource[]> 
   for (const { home, distro } of await listWslHomes()) {
     const src = new WslFileSource(home, distro);
     try {
-      const hit = await Promise.any(
-        TOOLS.flatMap((t) =>
-          t.detectPaths.map((p) =>
-            src.exists(p).then((ok) => {
-              if (!ok) throw new Error("no");
-              return p;
-            })
-          )
-        )
-      ).then(() => true).catch(() => false);
-      if (hit) sources.push(src);
+      // 全部 detectPaths 一次批量探测（不存在 existsBatch 的环境回退逐个 exists）。
+      const paths = TOOLS.flatMap((t) => t.detectPaths);
+      const present = src.existsBatch
+        ? await src.existsBatch(paths).catch(() => paths.map(() => false))
+        : await Promise.all(paths.map((p) => src.exists(p).catch(() => false)));
+      if (present.some(Boolean)) sources.push(src);
     } catch {}
   }
   multiCache.set(machine.id, sources);

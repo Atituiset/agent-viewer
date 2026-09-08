@@ -225,6 +225,25 @@ export class SshFileSource implements FileSource {
     }
   }
 
+  /**
+   * 批量存在性探测：N 条 test -e 拼进一条 shell 命令，echo 逐行打 0/1。
+   * 把 N 个 RTT 压成 1 个——detect 阶段对全部 agent 的 detectPaths 一次探完。
+   */
+  async existsBatch(paths: string[]): Promise<boolean[]> {
+    if (paths.length === 0) return [];
+    const tests = paths.map((p) => {
+      const abs = this.abs(p);
+      return `( test -e ${this.sh(abs)} && echo 1 ) || echo 0`;
+    });
+    const out = await this.exec(tests.join(";"));
+    const lines = out.split("\n").filter((l) => l !== "");
+    // 命令拼接异常（截断/对端怪 shell）时行数对不上：保守回退逐个探，宁慢不假。
+    if (lines.length !== paths.length) {
+      return Promise.all(paths.map((p) => this.exists(p)));
+    }
+    return lines.map((l) => l.trim() === "1");
+  }
+
   async readDir(p: string): Promise<DirEntry[]> {
     // GNU find：%y=类型(f/d/l...)，%f=basename。-mindepth 1 跳过目录自身。
     let out: string;

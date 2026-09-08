@@ -78,6 +78,26 @@ function atomicWrite(file: string, data: string) {
   fs.renameSync(tmp, file);
 }
 
+// machines 列表的短 TTL 缓存：sessions:read/stamp 每 3s LIVE 轮询都要 machineById
+// → loadMachines，不缓存等于每次轮询重读 machines.json + 重新解析 ~/.ssh/config。
+// 写路径（add/remove/save）自行失效；测试直接用 loadMachines 保持直读语义。
+const MACHINES_CACHE_MS = 5_000;
+let cache: { at: number; value: MachineConfig[] } | null = null;
+
+/** IPC 热路径用：带 TTL 缓存的 loadMachines。 */
+export function loadMachinesCached(): MachineConfig[] {
+  const now = Date.now();
+  if (cache && now - cache.at < MACHINES_CACHE_MS) return cache.value;
+  const value = loadMachines();
+  cache = { at: now, value };
+  return value;
+}
+
+/** machines:add/remove/save 后调用，立即失效缓存（写后读不过期）。 */
+export function invalidateMachinesCache() {
+  cache = null;
+}
+
 export function loadMachines(): MachineConfig[] {
   ensureConfigDir();
   let persisted: MachineConfig[];
@@ -124,10 +144,11 @@ export function saveMachines(machines: MachineConfig[]) {
   ensureConfigDir();
   // auto 机器是 ~/.ssh/config 的派生物，不落盘。
   atomicWrite(machinesFile(), JSON.stringify(sanitizeForDisk(machines.filter((m) => !m.auto)), null, 2));
+  invalidateMachinesCache();
 }
 
 export function addMachine(machine: Omit<MachineConfig, "id" | "status">): MachineConfig {
-
+  invalidateMachinesCache();
   const machines = loadMachines();
   let id = `ssh-${machine.host}-${machine.port}`;
   while (machines.some((m) => m.id === id)) id += `-${Math.random().toString(36).slice(2, 6)}`;
@@ -142,6 +163,7 @@ export function addMachine(machine: Omit<MachineConfig, "id" | "status">): Machi
 }
 
 export function removeMachine(id: string) {
+  invalidateMachinesCache();
   const all = loadMachines();
   const target = all.find((m) => m.id === id);
   saveMachines(all.filter((m) => m.id !== id));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ConversationMessage } from "@/lib/types";
 import { useT, type MsgKey } from "@/components/i18n";
@@ -247,7 +247,8 @@ function ToolCallRows({ toolCalls }: { toolCalls: NonNullable<ConversationMessag
   );
 }
 
-function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolean }) {
+/** memo：虚拟滚动回扫时不重渲染未变节点（内部含 markdown 解析）。 */
+const LaneNode = memo(function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolean }) {
   const t = useT();
   const [xContent, setXContent] = useState(false);
   const [xThink, setXThink] = useState(false);
@@ -316,4 +317,4 @@ function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolea
       )}
     </div>
   );
-}
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { ToolCall } from "@/lib/types";
 import { useT } from "@/components/i18n";
 
@@ -8,9 +8,11 @@ interface Props {
   tool: ToolCall;
 }
 
-export default function ToolCallBlock({ tool }: Props) {
+/** memo：LIVE 轮询重渲染列表时，未变的工具块（含大段 output 的 JSON.stringify）不重算。 */
+const ToolCallBlock = memo(function ToolCallBlock({ tool }: Props) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
+  const inputJson = useMemo(() => (tool.input && Object.keys(tool.input).length > 0 ? JSON.stringify(tool.input, null, 2) : ""), [tool.input]);
 
   const statusColor = tool.status === "completed"
     ? "text-green-500"
@@ -27,11 +29,11 @@ export default function ToolCallBlock({ tool }: Props) {
           {tool.status && <span className={`ml-auto text-[10px] ${statusColor}`}>{tool.status}</span>}
         </summary>
 
-        {tool.input && Object.keys(tool.input).length > 0 && (
+        {inputJson && (
           <div className="border-t border-zinc-800 px-4 py-2.5">
             <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1.5">{t("tool.input")}</div>
             <pre className="text-xs text-zinc-400 whitespace-pre-wrap break-all font-mono max-h-48 overflow-y-auto scrollbar-thin">
-              {JSON.stringify(tool.input, null, 2)}
+              {inputJson}
             </pre>
           </div>
         )}
@@ -47,4 +49,6 @@ export default function ToolCallBlock({ tool }: Props) {
       </details>
     </div>
   );
-}
+});
+
+export default ToolCallBlock;

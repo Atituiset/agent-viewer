@@ -17,6 +17,12 @@ export interface FileSource {
   readonly kind: "local" | "ssh";
   readonly home: string;
   exists(p: string): Promise<boolean>;
+  /**
+   * 批量探测存在性：一条命令/系统调用序列拿回全部结果，替代 N 次串行 exists()
+   * （SSH 下每次 exists 是一个独立 exec = 1 RTT，detect 阶段有 N 个 detectPaths）。
+   * 未实现时由调用方回退逐个 exists。
+   */
+  existsBatch?(paths: string[]): Promise<boolean[]>;
   readDir(p: string): Promise<DirEntry[]>;
   readFile(p: string): Promise<string>;
   readFileBuffer(p: string): Promise<Buffer>;

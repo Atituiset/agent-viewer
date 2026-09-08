@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -35,8 +36,12 @@ function preprocessJsonContent(text: string): string {
   return text;
 }
 
-export default function MarkdownContent({ content }: Props) {
-  const processed = preprocessJsonContent(content);
+/**
+ * memo：LIVE 轮询每次 setMessages 都会重渲染整个列表，同一内容不该重新跑
+ * markdown 解析 + 语法高亮（大会话里是整个视图里最贵的渲染路径）。
+ */
+const MarkdownContent = memo(function MarkdownContent({ content }: Props) {
+  const processed = useMemo(() => preprocessJsonContent(content), [content]);
   return (
     <div className="message-content text-sm text-zinc-300 leading-relaxed">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
@@ -44,4 +49,6 @@ export default function MarkdownContent({ content }: Props) {
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+export default MarkdownContent;

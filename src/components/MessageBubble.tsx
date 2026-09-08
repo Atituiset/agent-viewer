@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { ConversationMessage } from "@/lib/types";
 import { useT } from "@/components/i18n";
 import MarkdownContent from "./MarkdownContent";
@@ -26,7 +26,8 @@ const SOURCE_STYLES: Record<string, { color: string; label: string }> = {
 
 const CLAMP_CHARS = 600;
 
-export default function MessageBubble({ message, compact }: Props) {
+/** memo：虚拟滚动回扫 + LIVE 刷新时，内容未变的气泡不重渲染（markdown 重解析很贵）。 */
+const MessageBubble = memo(function MessageBubble({ message, compact }: Props) {
   const t = useT();
   const [showThinking, setShowThinking] = useState(false);
   const [expandContent, setExpandContent] = useState(false);
@@ -142,4 +143,6 @@ export default function MessageBubble({ message, compact }: Props) {
       </div>
     </div>
   );
-}
+});
+
+export default MessageBubble;

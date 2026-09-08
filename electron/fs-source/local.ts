@@ -123,6 +123,10 @@ export class LocalFileSource implements FileSource {
     }
   }
 
+  async existsBatch(paths: string[]): Promise<boolean[]> {
+    return Promise.all(paths.map((p) => this.exists(p)));
+  }
+
   async readDir(p: string): Promise<DirEntry[]> {
     const ents = await fs.promises.readdir(resolvePath(this, p), { withFileTypes: true });
     return ents.map((e) => ({ name: e.name, isDirectory: e.isDirectory() }));

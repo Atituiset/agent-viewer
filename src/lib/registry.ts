@@ -1,10 +1,11 @@
 import type { FileSource } from "../../electron/fs-source/types";
+import { join } from "../../electron/fs-source/util";
 import type { ConversationMessage, DetectedTool, ToolSession } from "./types";
-import { listClaudeSessionsAll, readClaudeSession } from "./claude";
-import { listCodexSessions, readCodexSession } from "./codex";
+import { listClaudeSessionsAll, readClaudeSession, countClaudeSessions } from "./claude";
+import { listCodexSessions, readCodexSession, countCodexSessions } from "./codex";
 import { listOpenCodeSessions, readOpenCodeSession } from "./opencode";
 import { listGeminiSessions, readGeminiSession } from "./gemini";
-import { listDeepSeekSessions, readDeepSeekSession } from "./deepseek";
+import { listDeepSeekSessions, readDeepSeekSession, countDeepSeekSessions } from "./deepseek";
 import { listHermesSessions, readHermesSession } from "./hermes";
 import { listKimiSessions, readKimiSession } from "./kimi";
 import { decodeGenericId, listGenericSessions, readGenericSession } from "./generic";
@@ -32,6 +33,12 @@ export interface ToolEntry {
     sessionId: string,
     projectPath?: string
   ) => Promise<ConversationMessage[]>;
+  /**
+   * detect 阶段的轻量会话计数（工具卡片上的数字）。
+   * 缺省回退 listSessions().length——但那会拉全部文件头（SSH 下几百个 RTT）。
+   * jsonl/json 平铺布局的工具应实现：readDir 数文件即可。
+   */
+  countSessions?: (source: FileSource) => Promise<number>;
 }
 
 export const TOOLS: ToolEntry[] = [
@@ -44,6 +51,7 @@ export const TOOLS: ToolEntry[] = [
     detectPaths: [".claude/projects"],
     requiresProjectPath: true,
     listSessions: listClaudeSessionsAll,
+    countSessions: countClaudeSessions,
     readSession: (src, sessionId, projectPath) => {
       if (!projectPath) throw new Error("claude-code session requires projectPath");
       return readClaudeSession(src, projectPath, sessionId);
@@ -67,6 +75,7 @@ export const TOOLS: ToolEntry[] = [
     description: "DeepSeek CLI sessions",
     detectPaths: [".deepseek/sessions"],
     listSessions: listDeepSeekSessions,
+    countSessions: countDeepSeekSessions,
     readSession: readDeepSeekSession,
   },
   {
@@ -77,6 +86,7 @@ export const TOOLS: ToolEntry[] = [
     description: "OpenAI Codex CLI sessions",
     detectPaths: [".codex/sessions"],
     listSessions: listCodexSessions,
+    countSessions: countCodexSessions,
     readSession: readCodexSession,
   },
   {
@@ -132,29 +142,55 @@ export function getTool(toolId: string): ToolEntry {
   throw new Error("unknown tool: " + toolId);
 }
 
-/** 检测所有已安装的工具并统计会话数（全并行）。
+/** 数一层/两层目录下的 jsonl|json 文件数（轻量计数，detect 卡片用）；子目录 readDir 并行。 */
+async function countTranscriptFiles(source: FileSource, root: string): Promise<number> {
+  const entries = await source.readDir(root).catch(() => [] as DirEntryLike[]);
+  // 文件直接数；子目录并行 readDir 再数一层。
+  const subs = await Promise.all(
+    entries.map(async (e): Promise<number> => {
+      if (!e.isDirectory) return 0;
+      const sub = await source.readDir(join(root, e.name)).catch(() => [] as DirEntryLike[]);
+      return sub.filter((f) => !f.isDirectory && /\.(jsonl|json)$/i.test(f.name)).length;
+    })
+  );
+  return subs.reduce((n, c) => n + c, 0) + entries.filter((e) => !e.isDirectory && /\.(jsonl|json)$/i.test(e.name)).length;
+}
+
+type DirEntryLike = { name: string; isDirectory: boolean };
+
+/** 逐路径探测存在性：source 支持 existsBatch 时一条命令拿回全部结果（SSH 下 N RTT → 1）。 */
+async function detectPathsPresent(source: FileSource, paths: string[]): Promise<boolean[]> {
+  if (source.existsBatch) {
+    try {
+      return await source.existsBatch(paths);
+    } catch {
+      // 批量命令失败：回退逐个探。
+    }
+  }
+  return Promise.all(paths.map((p) => source.exists(p)));
+}
+
+/** 检测所有已安装的工具并统计会话数。
  *  已知 agent 走固定 detectPaths；另做一轮启发式发现，接住不在名单里、
  *  但遵循 ~/.<agent>/sessions|projects|history 布局的 agent（内部 CLI、新 agent）。
- *  两条腿互不干扰：发现失败只影响发现条目。 */
+ *  两条腿互不干扰：发现失败只影响发现条目。
+ *  计数走 countSessions（readDir 级），不再为卡片数字拉全部文件。 */
 export async function detectTools(source: FileSource): Promise<DetectedTool[]> {
+  // 全部 detectPaths 一次性探测（SSH：N 条 test -e 拼一条命令，1 个 RTT）。
+  const allPaths = TOOLS.flatMap((t) => t.detectPaths);
+  const allPresent = await detectPathsPresent(source, allPaths);
+  let pathIdx = 0;
   const known = await Promise.all(
     TOOLS.map(async (tool): Promise<DetectedTool> => {
-      const detected = await Promise.any(
-        tool.detectPaths.map((p) =>
-          source.exists(p).then((ok) => {
-            if (!ok) throw new Error("no");
-            return p;
-          })
-        )
-      )
-        .then(() => true)
-        .catch(() => false);
+      const detected = tool.detectPaths.some(() => allPresent[pathIdx++]);
       let sessionCount = 0;
       if (detected) {
         try {
-          sessionCount = (await tool.listSessions(source)).length;
+          sessionCount = tool.countSessions
+            ? await tool.countSessions(source)
+            : (await tool.listSessions(source)).length;
         } catch (e) {
-          console.error(`[detect] ${tool.id} listSessions failed:`, e);
+          console.error(`[detect] ${tool.id} count failed:`, e);
         }
       }
       return {
@@ -177,9 +213,9 @@ export async function detectTools(source: FileSource): Promise<DetectedTool[]> {
       agents.map(async (d) => {
         let sessionCount = 0;
         try {
-          sessionCount = (await listGenericSessions(source, d.rootRel)).length;
+          sessionCount = await countTranscriptFiles(source, d.rootRel);
         } catch (e) {
-          console.error(`[discover] ${d.rootRel} listSessions failed:`, e);
+          console.error(`[discover] ${d.rootRel} count failed:`, e);
         }
         return {
           id: d.id,
