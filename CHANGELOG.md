@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-08
+
+### Changed
+
+- **Performance — SSH round trips**: detect-stage existence probes for all
+  agents are now batched into a single remote command (N RTT → 1). Tool-card
+  session counts use directory listings instead of per-file
+  stat/readHead/lineCount. Codex session-file lookup is cached per machine,
+  so LIVE polling no longer walks the whole `.codex/sessions` tree twice
+  every 3 seconds; directory walks on remote machines are parallelized.
+- **Performance — large sessions (renderer)**: search haystacks are
+  precomputed once per message instead of lowercasing the whole transcript
+  on every keystroke; message bubbles, markdown content, and tool blocks are
+  memoized so virtual-scroll rescans no longer re-run markdown parsing and
+  syntax highlighting.
+- Machine config reads on the IPC hot path use a short-lived cache; it is
+  invalidated whenever machines are added/removed/saved.
+
+## [0.5.1] - 2026-09-07
+
 ### Fixed
 
 - Switching machines no longer leaves the previous machine's tool/session
