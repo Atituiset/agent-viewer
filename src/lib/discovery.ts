@@ -80,8 +80,10 @@ export async function discoverAgents(source: FileSource): Promise<DiscoveredAgen
   const known = knownTerritories();
 
   // ---- 腿 1：文件驱动（不依赖目录名）----
-  // rootRel → 采样文件 rel（null = 目录名驱动补的，还没采样）
-  const rootsFromFiles = new Map<string, string | null>();
+  // rootRel → 候选采样文件列表（按 mtime 降序，最多留几个：根目录里最新文件
+  // 未必是转录——如 .codewhale 的 file-frecency.jsonl 比 sessions/ 新，单采样会误杀）。
+  const SAMPLES_PER_ROOT = 3;
+  const rootsFromFiles = new Map<string, string[]>();
   if (typeof source.scanTranscriptFiles === "function") {
     try {
       for (const f of await source.scanTranscriptFiles()) {
@@ -89,8 +91,9 @@ export async function discoverAgents(source: FileSource): Promise<DiscoveredAgen
         if (!rootRel || isNoise(rootRel)) continue;
         if (known.has(rootRel.split("/").slice(0, -1).join("/"))) continue;
         if (known.has(rootRel)) continue; // $HOME 平铺型根（.codeagent 本身）
-        // 聚合：一个根目录多个文件只记一次（首选活跃度最高的——扫描结果已按 mtime 降序）。
-        if (!rootsFromFiles.has(rootRel)) rootsFromFiles.set(rootRel, f.rel);
+        const list = rootsFromFiles.get(rootRel);
+        if (!list) rootsFromFiles.set(rootRel, [f.rel]);
+        else if (list.length < SAMPLES_PER_ROOT) list.push(f.rel);
       }
     } catch {}
   }
@@ -103,18 +106,22 @@ export async function discoverAgents(source: FileSource): Promise<DiscoveredAgen
         const parent = rootRel.slice(0, rootRel.lastIndexOf("/"));
         if (known.has(parent) || known.has(rootRel)) continue;
         if (isNoise(rootRel)) continue;
-        if (!rootsFromFiles.has(rootRel)) rootsFromFiles.set(rootRel, null); // null = 待采样（腿 1 没覆盖到）
+        if (!rootsFromFiles.has(rootRel)) rootsFromFiles.set(rootRel, []); // 空 = 待采样（腿 1 没覆盖到）
       }
     } catch {}
   }
 
   // ---- 验证与收录 ----
   const out: DiscoveredAgent[] = [];
-  for (const [rootRel, sampleFile] of rootsFromFiles) {
-    const kind = sampleFile
-      ? await sampleKindOfFile(source, sampleFile)
-      : await sampleKind(source, rootRel);
-    if (!kind) continue; // 解析不出任何已知格式 → 宁可不显示
+  for (const [rootRel, samples] of rootsFromFiles) {
+    // 逐个候选采样，第一个能判定格式的即收录；全部采不出 → 宁可不显示。
+    let kind: GenericKind | null = null;
+    for (const rel of samples) {
+      kind = await sampleKindOfFile(source, rel);
+      if (kind) break;
+    }
+    if (!kind && samples.length === 0) kind = await sampleKind(source, rootRel);
+    if (!kind) continue;
     out.push({
       id: encodeGenericId(kind, rootRel),
       name: displayNameOf(rootRel),

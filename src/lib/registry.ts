@@ -135,7 +135,7 @@ export function getTool(toolId: string): ToolEntry {
       color: "#a78bfa",
       description: `Discovered agent — ${rootRel}`,
       detectPaths: [rootRel],
-      listSessions: (source) => listGenericSessions(source, rootRel),
+      listSessions: (source) => listGenericSessions(source, rootRel, gen.kind),
       readSession: (source, sessionId) => readGenericSession(source, gen.kind, rootRel, sessionId),
     };
   }
