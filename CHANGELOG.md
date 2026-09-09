@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-09
+
+### Fixed
+
+- **Agent discovery now recognizes single-file JSON session transcripts**
+  (e.g. codewhale's `~/.codewhale/sessions/<id>.json`: one pretty-printed
+  JSON object per session with a `messages` array). Previously only
+  line-delimited JSONL was recognized; a truncated head sample of a large
+  single-file JSON could never parse, so such agents never showed up.
+  Claude-style content blocks (`text`/`thinking`/`tool_use`/`tool_result`)
+  and OpenAI-style `tool_calls` are both handled.
+- Discovery sampling is more robust: up to 3 files per candidate root are
+  sampled before giving up (the newest file in a directory is not always a
+  transcript — e.g. `file-frecency.jsonl` shadowing `sessions/*.json`).
+
 ## [0.6.0] - 2026-09-08
 
 ### Changed
