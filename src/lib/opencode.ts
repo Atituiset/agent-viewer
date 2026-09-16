@@ -1,4 +1,4 @@
-import { opencodeSessionsFromDb } from "agent-session-format";
+import { opencodeSessionFromDb } from "agent-session-format";
 import { withSqliteDb, type DbLike } from "../../electron/sqlite";
 import type { FileSource } from "../../electron/fs-source/types";
 import type { ConversationMessage, ToolSession } from "./types";
@@ -39,9 +39,9 @@ export async function listOpenCodeSessions(source: FileSource): Promise<ToolSess
 export async function readOpenCodeSession(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
   if (!(await source.exists(DB_REL))) return [];
   return withDb(source, async (db) => {
-    // 包接口一次性映射全部会话（逐条容错：坏记录跳过）；按 id 取出目标会话。
-    const sessions = await opencodeSessionsFromDb(db, { source: "opencode" });
-    const nir = sessions.find((s) => s.id === sessionId);
+    // 单会话查询（v0.2.0 起）：只读目标会话的 message/part 行，
+    // 远程桥（SSH/WSL querySqlite）下不再为别的会话付 RTT。
+    const nir = await opencodeSessionFromDb(db, sessionId, { source: "opencode" });
     return nir ? nirToConversation(nir, "opencode") : [];
   });
 }

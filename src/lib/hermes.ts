@@ -1,4 +1,4 @@
-import { hermesSessionsFromDb, parseHermesDump } from "agent-session-format";
+import { hermesSessionFromDb, parseHermesDump } from "agent-session-format";
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import { withSqliteDb } from "../../electron/sqlite";
@@ -102,9 +102,8 @@ export async function readHermesSession(source: FileSource, sessionId: string): 
 async function readFromStateDb(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
   try {
     return await withSqliteDb(source, STATE_DB, async (db) => {
-      // 包接口一次性映射全部会话（state.db 体量小）；按 id 取出目标会话。
-      const sessions = await hermesSessionsFromDb(db, { source: "hermes" });
-      const nir = sessions.find((s) => s.id === sessionId);
+      // 单会话查询（v0.2.0 起）：只取目标会话的消息行。
+      const nir = await hermesSessionFromDb(db, sessionId, { source: "hermes" });
       return nir ? nirToConversation(nir, "hermes") : [];
     });
   } catch {
