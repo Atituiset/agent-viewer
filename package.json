@@ -102,7 +102,7 @@
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
     "agent-session-format": "^0.2.0",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^13.0.3",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
