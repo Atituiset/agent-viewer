@@ -1,7 +1,8 @@
+import { parseClaudeCodeTranscript } from "agent-session-format";
 import type { DirEntry, FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
-import type { ClaudeMessage, ContentBlock, ConversationMessage, ToolCall, ToolSession } from "./types";
-import { pairToolOutputInMessages } from "./tool-pairing";
+import type { ClaudeMessage, ConversationMessage, ToolSession } from "./types";
+import { nirToConversation } from "./nir-map";
 
 const ROOT = ".claude/projects";
 
@@ -96,7 +97,7 @@ export async function readClaudeSession(
   const fileRel = join(ROOT, projectPath, `${sessionId}.jsonl`);
   if (!(await source.exists(fileRel))) return [];
 
-  const messages = parseClaudeTranscript(await source.readFile(fileRel));
+  const messages = parseClaudeTranscript(await source.readFile(fileRel), fileRel);
 
   // Task 工具 spawn 的 subagent 转录在 <sessionId>/subagents/agent-<id>.jsonl，
   // 行格式与主文件相同；agentId 从文件名取，显示名从同名 .meta.json 取。
@@ -115,7 +116,13 @@ export async function readClaudeSession(
       const agentId = match[1];
       try {
         const agentLabel = await readAgentLabel(source, join(subagentsDir, `agent-${agentId}.meta.json`), agentId);
-        const sub = parseClaudeTranscript(await source.readFile(join(subagentsDir, entry.name)));
+        // subagent 转录的每一行都带 isSidechain:true，而上游解析器会跳过
+        // sidechain 行（那是针对主文件内联 sidechain 的规则）——独立文件场景下
+        // 先把标记抹掉再解析。
+        const sub = parseClaudeTranscript(
+          stripSidechainFlag(await source.readFile(join(subagentsDir, entry.name))),
+          join(subagentsDir, entry.name)
+        );
         for (const msg of sub) {
           msg.agent = agentId;
           msg.agentLabel = agentLabel;
@@ -129,6 +136,24 @@ export async function readClaudeSession(
   return messages;
 }
 
+/** 逐行把 "isSidechain":true 改为 false（仅对合法 JSON 行动手，坏行原样保留）。 */
+function stripSidechainFlag(text: string): string {
+  if (!text.includes('"isSidechain":true')) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (!line.includes('"isSidechain":true')) return line;
+      try {
+        const obj = JSON.parse(line) as Record<string, unknown>;
+        obj.isSidechain = false;
+        return JSON.stringify(obj);
+      } catch {
+        return line;
+      }
+    })
+    .join("\n");
+}
+
 async function readAgentLabel(source: FileSource, metaRel: string, agentId: string): Promise<string> {
   try {
     const meta = JSON.parse(await source.readFile(metaRel)) as { agentType?: unknown; description?: unknown };
@@ -140,111 +165,9 @@ async function readAgentLabel(source: FileSource, metaRel: string, agentId: stri
   return `agent-${agentId}`;
 }
 
-/** 解析单个 jsonl 转录文件（主会话与 subagent 转录格式一致），并配对 tool_result。
- *  纯函数：供 claude 本体与启发式发现的未知 agent（claude 形转录）共用。 */
-export function parseClaudeTranscript(content: string): ConversationMessage[] {
-  const messages: ConversationMessage[] = [];
-  const toolResults: Array<{ toolUseId: string; output: string }> = [];
-  const lines = content.split("\n");
-
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const obj: ClaudeMessage = JSON.parse(line);
-      if (obj.type === "user" && obj.message) {
-        const msg = obj.message as { role?: string; content?: string | ContentBlock[] | ContentBlock };
-        const { text, toolResults: results } = extractUserContent(msg.content);
-        if (results) toolResults.push(...results);
-        messages.push({
-          id: obj.uuid || `user-${messages.length}`,
-          role: "user",
-          content: text,
-          timestamp: obj.timestamp || new Date().toISOString(),
-          source: "claude",
-        });
-      } else if (obj.type === "assistant" && obj.message) {
-        const msg = obj.message as { role?: string; content?: string | ContentBlock[] | ContentBlock };
-        const { text, thinking, toolCalls } = extractAssistantContent(msg.content);
-        messages.push({
-          id: obj.uuid || `assistant-${messages.length}`,
-          role: "assistant",
-          content: text,
-          timestamp: obj.timestamp || new Date().toISOString(),
-          thinking,
-          toolCalls,
-          source: "claude",
-        });
-      }
-    } catch {}
-  }
-
-  // 把 tool_result 按 tool_use_id 配回之前的 tool_use，输出内联显示（统一 helper，见 tool-pairing.ts）。
-  for (const r of toolResults) pairToolOutputInMessages(messages, r.output, r.toolUseId);
-
-  return messages;
-}
-
-function asContentBlocks(content: string | ContentBlock[] | ContentBlock | undefined): ContentBlock[] {
-  if (!content) return [];
-  if (typeof content === "string") return [{ type: "text", text: content }];
-  if (Array.isArray(content)) return content;
-  return [content];
-}
-
-function extractTextFromContent(content: string | ContentBlock[] | ContentBlock | undefined): string {
-  return asContentBlocks(content)
-    .filter((b) => b.type === "text")
-    .map((b) => b.text || "")
-    .join("\n")
-    .trim();
-}
-
-function extractUserContent(
-  content: string | ContentBlock[] | ContentBlock | undefined
-): { text: string; toolResults?: Array<{ toolUseId: string; output: string }> } {
-  const blocks = asContentBlocks(content);
-  const text = blocks
-    .filter((b) => b.type === "text")
-    .map((b) => b.text || "")
-    .join("\n")
-    .trim();
-
-  const toolResults = blocks
-    .filter((b) => b.type === "tool_result")
-    .map((b) => ({
-      toolUseId: b.tool_use_id || "",
-      output: typeof b.content === "string" ? b.content : extractTextFromContent(b.content),
-    }))
-    .filter((r) => r.toolUseId);
-
-  return { text, toolResults: toolResults.length > 0 ? toolResults : undefined };
-}
-
-function extractAssistantContent(
-  content: string | ContentBlock[] | ContentBlock | undefined
-): { text: string; thinking?: string; toolCalls?: ToolCall[] } {
-  const blocks = asContentBlocks(content);
-  let text = "";
-  let thinking: string | undefined;
-  const toolCalls: ToolCall[] = [];
-
-  for (const block of blocks) {
-    if (block.type === "text" && block.text) {
-      text += block.text + "\n";
-    } else if (block.type === "thinking" && block.thinking) {
-      thinking = (thinking || "") + block.thinking + "\n";
-    } else if (block.type === "tool_use") {
-      toolCalls.push({
-        id: block.id,
-        name: block.name || "unknown",
-        input: (block.input as Record<string, unknown>) || {},
-      });
-    }
-  }
-
-  return {
-    text: text.trim(),
-    thinking: thinking?.trim(),
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-  };
+/** 解析单个 jsonl 转录文件（主会话与 subagent 转录格式一致）：包解析出 NIR，再映射成视图模型。 */
+export function parseClaudeTranscript(content: string, filePath?: string): ConversationMessage[] {
+  const nir = parseClaudeCodeTranscript(content, { source: "claude", filePath });
+  if (!nir) return [];
+  return nirToConversation(nir, "claude");
 }

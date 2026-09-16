@@ -1,7 +1,8 @@
+import { parseSessionJsonDocument } from "agent-session-format";
 import type { DirEntry, FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
-import type { ConversationMessage, ToolCall, ToolSession } from "./types";
-import { pairToolOutputInMessages } from "./tool-pairing";
+import type { ConversationMessage, ToolSession } from "./types";
+import { nirToConversation } from "./nir-map";
 
 const ROOT = ".deepseek/sessions";
 
@@ -49,40 +50,7 @@ export async function readDeepSeekSession(source: FileSource, sessionId: string)
     if (!match) return [];
     fileRel = join(ROOT, match.name);
   }
-  try {
-    const data = JSON.parse(await source.readFile(fileRel));
-    const messages = data.messages || [];
-    const result: ConversationMessage[] = [];
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      const role = msg.role as string;
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      const ts = data.metadata?.created_at || new Date().toISOString();
-      if (role === "user" || role === "assistant") {
-        result.push({ id: `ds-${i}`, role, content, timestamp: ts, source: "deepseek" });
-        // assistant 消息自带的 tool_calls 挂到刚推入的这条上
-        if (role === "assistant" && msg.tool_calls) {
-          result[result.length - 1].toolCalls = parseDeepSeekToolCalls(msg.tool_calls);
-        }
-      } else if (role === "tool") {
-        // 工具结果配回最近未配对的 toolCall（deepseek 结果无 id，纯按时间就近）。
-        pairToolOutputInMessages(result, content);
-      } else if (msg.tool_calls) {
-        const toolCalls = parseDeepSeekToolCalls(msg.tool_calls);
-        const last = result[result.length - 1];
-        if (last && last.role === "assistant") last.toolCalls = [...(last.toolCalls || []), ...toolCalls];
-        else result.push({ id: `ds-tool-${i}`, role: "assistant", content: "", timestamp: ts, toolCalls, source: "deepseek" });
-      }
-    }
-    return result;
-  } catch {
-    return [];
-  }
-}
-
-function parseDeepSeekToolCalls(raw: unknown): ToolCall[] {
-  return ((raw as { function: { name: string; arguments: string } }[]) || []).map((tc) => ({
-    name: tc.function?.name || "unknown",
-    input: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return {}; } })(),
-  }));
+  const nir = parseSessionJsonDocument(await source.readFile(fileRel), { source: "deepseek", id: sessionId });
+  if (!nir) return [];
+  return nirToConversation(nir, "deepseek");
 }

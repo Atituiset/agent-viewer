@@ -59,7 +59,8 @@ describe("codex parser", () => {
 
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
     expect(msgs[0].content).toBe("list files");
-    expect(msgs[0].timestamp).toBe("2026-01-01T00:00:00.000Z");
+    // 包解析器原样保留 ISO 时间戳字符串，不再经 Date 归一化成 .000Z。
+    expect(msgs[0].timestamp).toBe("2026-01-01T00:00:00Z");
 
     const asst = msgs[1];
     expect(asst.content).toBe("here are the files");
@@ -86,7 +87,8 @@ describe("codex parser", () => {
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
     const tc = msgs[1].toolCalls![0];
     expect(tc.name).toBe("apply_patch");
-    expect(tc.input).toEqual({ patch: "*** Begin Patch\n*** Update File: a.ts\n*** End Patch" });
+    // 包解析器把无法 JSON.parse 的原始 input 包成 { raw }（旧实现是 { patch }）。
+    expect(tc.input).toEqual({ raw: "*** Begin Patch\n*** Update File: a.ts\n*** End Patch" });
     expect(tc.output).toBe("Success. Updated a.ts");
   });
 
