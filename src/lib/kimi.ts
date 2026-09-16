@@ -1,7 +1,8 @@
+import { parseKimiWire } from "agent-session-format";
 import type { DirEntry, FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
-import type { ConversationMessage, ToolCall, ToolSession } from "./types";
-import { attachToolOutput } from "./tool-pairing";
+import type { ConversationMessage, ToolSession } from "./types";
+import { nirToConversation } from "./nir-map";
 
 const ROOT = ".kimi-code/sessions";
 
@@ -93,7 +94,7 @@ export async function readKimiSession(source: FileSource, sessionId: string): Pr
         } catch {
           return null;
         }
-        const lane = parseWire(wire);
+        const lane = parseWire(wire, wireRel, agentId);
         if (agentId === "main") return { agentId, lane };
         const profile = extractProfileName(wire);
         return { agentId, lane, agentLabel: profile ? `${profile} · ${agentId}` : agentId };
@@ -114,72 +115,11 @@ export async function readKimiSession(source: FileSource, sessionId: string): Pr
   return messages;
 }
 
-/** 解析单个 wire.jsonl：user 消息 + 按 user turn flush 的 assistant 事件流。 */
-function parseWire(wire: string): ConversationMessage[] {
-  const messages: ConversationMessage[] = [];
-  // assistant 输出按事件流累积，遇到下一条 user 消息或文件结束时 flush。
-  let bufText = "";
-  let bufThinking = "";
-  let bufToolCalls: ToolCall[] = [];
-  let bufTs = "";
-
-  const ts = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : new Date().toISOString());
-  const flush = () => {
-    if (!bufText.trim() && !bufThinking.trim() && !bufToolCalls.length) return;
-    messages.push({
-      id: `kimi-asst-${messages.length}`,
-      role: "assistant",
-      content: bufText.trim(),
-      timestamp: bufTs || new Date().toISOString(),
-      thinking: bufThinking.trim() || undefined,
-      toolCalls: bufToolCalls.length ? bufToolCalls : undefined,
-      source: "kimi",
-    });
-    bufText = "";
-    bufThinking = "";
-    bufToolCalls = [];
-    bufTs = "";
-  };
-
-  for (const line of wire.split("\n")) {
-    if (!line.trim()) continue;
-    let o: Record<string, unknown>;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (o.type === "context.append_message") {
-      const msg = o.message as { role?: string; content?: unknown } | undefined;
-      if (msg?.role !== "user") continue;
-      flush();
-      messages.push({
-        id: `kimi-user-${messages.length}`,
-        role: "user",
-        content: extractText(msg.content),
-        timestamp: ts(o.time),
-        source: "kimi",
-      });
-    } else if (o.type === "context.append_loop_event") {
-      const e = o.event as Record<string, unknown>;
-      if (!bufTs) bufTs = ts(o.time);
-      if (e.type === "content.part") {
-        const part = e.part as { type?: string; text?: string; think?: string };
-        if (part.type === "text" && part.text) bufText += part.text + "\n";
-        else if (part.type === "think" && part.think) bufThinking += part.think + "\n";
-      } else if (e.type === "tool.call") {
-        bufToolCalls.push({
-          id: (e.toolCallId as string) || undefined,
-          name: (e.name as string) || "unknown",
-          input: (e.args as Record<string, unknown>) || {},
-        });
-      } else if (e.type === "tool.result") {
-        attachToolOutput(bufToolCalls, extractToolOutput(e.result), (e.toolCallId as string) || undefined);
-      }
-    }
-  }
-  flush();
-  return messages;
+/** 解析单个 wire.jsonl：包解析出 NIR（filePath 提供 agents/<name> 泳道信息），再映射成视图模型。 */
+function parseWire(wire: string, wireRel: string, agentId: string): ConversationMessage[] {
+  const nir = parseKimiWire(wire, { source: "kimi", filePath: wireRel, agent: agentId });
+  if (!nir) return [];
+  return nirToConversation(nir, "kimi");
 }
 
 /** 从 wire 文件取 profile.bind 事件的 profileName（如 "explore"），无则 null。 */
@@ -219,24 +159,4 @@ async function findSessionDir(source: FileSource, sessionId: string): Promise<st
   const hit = dirs.find((d): d is string => !!d);
   if (hit) perSource.set(sessionId, hit);
   return hit ?? null;
-}
-
-function extractText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((b) => (b && typeof b === "object" && (b as { type?: string }).type === "text" ? (b as { text?: string }).text || "" : ""))
-      .filter(Boolean)
-      .join("\n");
-  }
-  return content ? JSON.stringify(content) : "";
-}
-
-function extractToolOutput(result: unknown): string {
-  if (result && typeof result === "object") {
-    const output = (result as { output?: unknown }).output;
-    if (typeof output === "string") return output;
-    if (output !== undefined) return JSON.stringify(output);
-  }
-  return typeof result === "string" ? result : JSON.stringify(result ?? "");
 }

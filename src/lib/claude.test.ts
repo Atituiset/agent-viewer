@@ -64,20 +64,22 @@ describe("claude parser", () => {
     expect(msgs[1].content).toBe("hi");
   });
 
-  it("handles single-block assistant content and pairs tool results", async () => {
+  it("maps single-block assistant content into one bubble and pairs tool results via toolCallId", async () => {
     const src = new FakeFileSource().add(
       ".claude/projects/-home-user-proj/s1.jsonl",
       [USER, THINKING, TOOL_USE, TOOL_RESULT, FINAL_TEXT].join("\n") + "\n"
     );
     const msgs = await readClaudeSession(src, "-home-user-proj", "s1");
 
-    expect(msgs).toHaveLength(5);
+    // NIR→视图模型映射：相邻 assistant 事件（thinking / tool_use / 文本）合并成一个气泡，
+    // tool_result 按 toolCallId 配回 toolCalls[].output，不再落成空 user 泡。
+    expect(msgs).toHaveLength(2);
     expect(msgs[1].thinking).toBe("Let me check...");
-    expect(msgs[2].toolCalls).toHaveLength(1);
-    expect(msgs[2].toolCalls?.[0].name).toBe("Read");
-    expect(msgs[2].toolCalls?.[0].id).toBe("toolu_01");
-    expect(msgs[2].toolCalls?.[0].output).toBe("export const auth = ...");
-    expect(msgs[4].content).toBe("Done.");
+    expect(msgs[1].toolCalls).toHaveLength(1);
+    expect(msgs[1].toolCalls?.[0].name).toBe("Read");
+    expect(msgs[1].toolCalls?.[0].id).toBe("toolu_01");
+    expect(msgs[1].toolCalls?.[0].output).toBe("export const auth = ...");
+    expect(msgs[1].content).toBe("Done.");
   });
 
   it("merges subagent transcripts tagged with agent lane, sorted by timestamp", async () => {
@@ -117,7 +119,9 @@ describe("claude parser", () => {
 
     const msgs = await readClaudeSession(src, "-home-user-proj", "s1");
 
-    expect(msgs.map((m) => m.id)).toEqual(["u1", "su1", "a-task", "sa1"]);
+    // NIR 消息没有 uuid，id 由映射层生成；断言合并后的时序与泳道归属。
+    expect(msgs.map((m) => m.role)).toEqual(["user", "user", "assistant", "assistant"]);
+    expect(msgs.map((m) => m.timestamp)).toEqual([...msgs.map((m) => m.timestamp)].sort());
     expect(msgs[0].agent).toBeUndefined();
     expect(msgs[2].agent).toBeUndefined();
     expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: "task1", name: "Task" });

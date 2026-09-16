@@ -1,12 +1,12 @@
+import { hermesSessionsFromDb, parseHermesDump } from "agent-session-format";
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import { withSqliteDb } from "../../electron/sqlite";
-import type { ConversationMessage, ToolCall, ToolSession } from "./types";
-import { pairToolOutputInMessages } from "./tool-pairing";
+import type { ConversationMessage, ToolSession } from "./types";
+import { nirToConversation } from "./nir-map";
 
 interface HermesSessionEntry { session_id?: string; display_name?: string; created_at?: string; origin?: { chat_id?: string } }
-interface HermesMessage { role?: string; content?: unknown; tool_calls?: HermesToolCall[] }
-interface HermesToolCall { id?: string; function?: { name?: string; arguments?: string }; name?: string; args?: Record<string, unknown> }
+interface HermesMessage { role?: string; content?: unknown }
 const ROOT = ".hermes/sessions";
 // 新版 hermes 不再写 sessions.json + request dump，会话存 sqlite state.db。
 const STATE_DB = ".hermes/state.db";
@@ -16,6 +16,7 @@ export async function listHermesSessions(source: FileSource): Promise<ToolSessio
   return listFromSessionsJson(source);
 }
 
+/** state.db 的列表是轻量元数据查询（不读 messages 表——读消息是 read 的事）。 */
 async function listFromStateDb(source: FileSource): Promise<ToolSession[]> {
   try {
     return await withSqliteDb(source, STATE_DB, async (db) => {
@@ -101,50 +102,10 @@ export async function readHermesSession(source: FileSource, sessionId: string): 
 async function readFromStateDb(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
   try {
     return await withSqliteDb(source, STATE_DB, async (db) => {
-      const rows = (await db
-        .prepare(
-          `SELECT role, content, tool_calls, tool_call_id, timestamp, reasoning_content
-           FROM messages WHERE session_id = ? AND active = 1 ORDER BY timestamp`
-        )
-        .all(sessionId)) as Record<string, unknown>[];
-      const result: ConversationMessage[] = [];
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const role = (row.role as string) || "";
-        if (!["system", "user", "assistant", "tool"].includes(role)) continue;
-        const timestamp = row.timestamp
-          ? new Date((row.timestamp as number) * 1000).toISOString()
-          : new Date().toISOString();
-        // 工具结果按 tool_call_id 配回 assistant 的 toolCall，不再独立成泡；
-        // 配不到（id 不匹配/已全部配对）才作为 tool 消息落下。
-        if (role === "tool") {
-          const output = normalizeHermesContent(row.content);
-          if (pairToolOutputInMessages(result, output, (row.tool_call_id as string) || undefined)) continue;
-        }
-        let toolCalls: ToolCall[] | undefined;
-        if (typeof row.tool_calls === "string" && row.tool_calls) {
-          try {
-            const calls = JSON.parse(row.tool_calls) as HermesToolCall[];
-            if (Array.isArray(calls) && calls.length) {
-              toolCalls = calls.map((tc) => ({
-                id: tc.id as string | undefined,
-                name: tc.function?.name || tc.name || "unknown",
-                input: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return tc.args || {}; } })(),
-              }));
-            }
-          } catch {}
-        }
-        result.push({
-          id: `hermes-${i}`,
-          role: role as ConversationMessage["role"],
-          content: normalizeHermesContent(row.content),
-          timestamp,
-          thinking: (row.reasoning_content as string) || undefined,
-          toolCalls,
-          source: "hermes",
-        });
-      }
-      return result;
+      // 包接口一次性映射全部会话（state.db 体量小）；按 id 取出目标会话。
+      const sessions = await hermesSessionsFromDb(db, { source: "hermes" });
+      const nir = sessions.find((s) => s.id === sessionId);
+      return nir ? nirToConversation(nir, "hermes") : [];
     });
   } catch {
     return [];
@@ -154,30 +115,9 @@ async function readFromStateDb(source: FileSource, sessionId: string): Promise<C
 async function readFromDump(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
   const latest = await findLatestHermesDump(source, sessionId);
   if (!latest) return [];
-  try {
-    const data = JSON.parse(await source.readFile(latest)) as Record<string, unknown>;
-    const body = ((data.request as Record<string, unknown>)?.body as Record<string, unknown>) || {};
-    const messages = (body.messages as HermesMessage[]) || [];
-    const result: ConversationMessage[] = [];
-    const timestamp = (data.timestamp as string) || new Date().toISOString();
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      const role = msg.role || "";
-      const content = normalizeHermesContent(msg.content);
-      if (role === "system") result.push({ id: `hermes-${i}`, role: "system", content, timestamp, source: "hermes" });
-      else if (role === "user") result.push({ id: `hermes-${i}`, role: "user", content, timestamp, source: "hermes" });
-      else if (role === "assistant") {
-        const toolCalls: ToolCall[] = (msg.tool_calls || []).map((tc) => ({
-          name: tc.function?.name || tc.name || "unknown",
-          input: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return tc.args || {}; } })(),
-        }));
-        result.push({ id: `hermes-${i}`, role: "assistant", content, timestamp, toolCalls: toolCalls.length ? toolCalls : undefined, source: "hermes" });
-      } else if (role === "tool") result.push({ id: `hermes-${i}`, role: "tool", content, timestamp, source: "hermes" });
-    }
-    return result;
-  } catch {
-    return [];
-  }
+  const nir = parseHermesDump(await source.readFile(latest), { source: "hermes", id: sessionId });
+  if (!nir) return [];
+  return nirToConversation(nir, "hermes");
 }
 
 async function findLatestHermesDump(source: FileSource, sessionId: string): Promise<string | null> {

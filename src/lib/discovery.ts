@@ -1,7 +1,8 @@
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
 import { extractTranscriptRoot } from "../../electron/fs-source/util";
-import { detectKind, encodeGenericId, type GenericKind } from "./generic";
+import { detectKind, type GenericKind } from "agent-session-format";
+import { encodeGenericId } from "./generic";
 import { TOOLS } from "./registry";
 import type { DetectedTool } from "./types";
 

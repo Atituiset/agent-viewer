@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FakeFileSource } from "../../electron/fs-source/fake";
 import { discoverAgents } from "./discovery";
 import { detectTools, getTool } from "./registry";
-import { detectKind, parseChatTranscript, encodeGenericId, decodeGenericId } from "./generic";
+import { encodeGenericId, decodeGenericId, detectKind } from "./generic";
 import { listGenericSessions, readGenericSession } from "./generic";
 
 const HOME = "/home/test";
@@ -23,57 +23,15 @@ function seedCodeagent(src: FakeFileSource, n = 1): void {
   }
 }
 
-describe("detectKind 采样分类", () => {
-  it("识别 claude 形", () => {
-    const line = JSON.stringify({ type: "assistant", message: { role: "assistant", content: "x" } });
-    expect(detectKind(line)).toBe("claude-style");
-  });
-  it("识别 codex 形", () => {
-    const line = JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [] } });
-    expect(detectKind(line)).toBe("codex-style");
-  });
-  it("识别 chat 形", () => {
-    const line = JSON.stringify({ role: "user", content: "hello" });
-    expect(detectKind(line)).toBe("chat-style");
-  });
-  it("识别 session 形（完整单文件 JSON messages）", () => {
-    const whole = JSON.stringify({
-      schema_version: 1,
-      metadata: { id: "a", title: "T", created_at: "2026-07-01T00:00:00Z" },
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-    });
-    expect(detectKind(whole)).toBe("session-style");
-  });
-  it("识别 session 形的截断片段（readHead 只取了几 KB，JSON 不闭合）", () => {
-    // codewhale 真实布局：几百 KB 的 pretty JSON，首 4KB 截断在字符串中间。
-    const big = JSON.stringify({
-      schema_version: 1,
-      metadata: { id: "a", title: "T" },
-      messages: [{ role: "user", content: [{ type: "text", text: "x".repeat(8000) }] }],
-    }).slice(0, 4096);
-    expect(detectKind(big)).toBe("session-style");
-  });
-  it("配置文件（无 messages+role 特征）不误判为 session 形", () => {
-    expect(detectKind(JSON.stringify({ version: 1, settings: { a: 1 } }))).toBeNull();
-    // messages 键存在但成员不是 {role, content} 形状 → 不认
-    expect(detectKind(JSON.stringify({ messages: ["plain"] }))).toBeNull();
-  });
-  it("不认识的 JSON 与坏行返回 null", () => {
+describe("detectKind 采样分类（agent-session-format 的集成冒烟，完整用例在上游包）", () => {
+  it("发现流程用到的四种形态都能分类", () => {
+    expect(detectKind(JSON.stringify({ type: "assistant", message: { role: "assistant", content: "x" } }))).toBe("claude-style");
+    expect(detectKind(JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [] } }))).toBe("codex-style");
+    expect(detectKind(JSON.stringify({ role: "user", content: "hello" }))).toBe("chat-style");
+    expect(
+      detectKind(JSON.stringify({ metadata: { id: "a" }, messages: [{ role: "user", content: "hi" }] }))
+    ).toBe("session-style");
     expect(detectKind('{"foo":1}')).toBeNull();
-    expect(detectKind("not json")).toBeNull();
-  });
-});
-
-describe("parseChatTranscript", () => {
-  it("逐行解析并配对 tool 结果", () => {
-    const content = [
-      JSON.stringify({ role: "user", content: "q", timestamp: "2026-09-01T00:00:00Z" }),
-      JSON.stringify({ role: "assistant", content: "a", timestamp: "2026-09-01T00:01:00Z" }),
-      "bad line {",
-      JSON.stringify({ role: "tool", content: "tool output" }),
-    ].join("\n");
-    const msgs = parseChatTranscript(content);
-    expect(msgs).toHaveLength(2); // tool 已配对（就近配到 assistant），坏行跳过
   });
 });
 
@@ -193,11 +151,12 @@ describe("discoverAgents 启发式发现", () => {
     expect(sessions[0].messageCount).toBe(3);
 
     const msgs = await readGenericSession(src, "session-style", ".codewhale/sessions", "1111");
-    // tool_result 配回 assistant 的 tool_use（配对成功则第 3 条 user 被吸收），与 claude 解析器同口径。
-    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
+    // NIR→视图模型映射：tool_result 按 toolCallId 配回 tool_use，相邻 assistant 事件
+    // （thinking / tool_use / 收尾文本）合并进同一个气泡。
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(msgs[1].thinking).toBe("先读文件");
     expect(msgs[1].toolCalls?.[0]).toMatchObject({ id: "tu1", name: "read_file", input: { path: "README.md" }, output: "# hello" });
-    expect(msgs[2].content).toBe("这是项目说明。");
+    expect(msgs[1].content).toBe("这是项目说明。");
   });
 
   it("session 形也支持 OpenAI 风格 tool_calls / tool 消息配对", async () => {
@@ -217,8 +176,9 @@ describe("discoverAgents 启发式发现", () => {
     const found = await discoverAgents(src);
     expect(found.find((f) => f.rootRel === ".openai-ish/sessions")?.kind).toBe("session-style");
     const msgs = await readGenericSession(src, "session-style", ".openai-ish/sessions", "s1");
-    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(msgs[1].toolCalls?.[0]).toMatchObject({ id: "c1", name: "exec", input: { cmd: "ls" }, output: "a\nb" });
+    expect(msgs[1].content).toBe("两个文件");
   });
 });
 

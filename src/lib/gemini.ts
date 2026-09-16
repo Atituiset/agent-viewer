@@ -1,9 +1,9 @@
+import { parseAntigravityTranscript } from "agent-session-format";
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
-import type { ConversationMessage, ToolCall, ToolSession } from "./types";
-import { pairToolOutputInMessages } from "./tool-pairing";
+import type { ConversationMessage, ToolSession } from "./types";
+import { nirToConversation } from "./nir-map";
 
-interface GeminiToolCall { name?: string; args?: Record<string, unknown> }
 const ROOT = ".gemini/antigravity-cli";
 
 export async function listGeminiSessions(source: FileSource): Promise<ToolSession[]> {
@@ -34,45 +34,17 @@ export async function listGeminiSessions(source: FileSource): Promise<ToolSessio
 export async function readGeminiSession(source: FileSource, conversationId: string): Promise<ConversationMessage[]> {
   const transcriptPath = join(ROOT, "brain", conversationId, ".system_generated", "logs", "transcript.jsonl");
   if (!(await source.exists(transcriptPath))) return [];
-  const result: ConversationMessage[] = [];
-  let index = 0;
+  let text: string;
   try {
-    for (const line of (await source.readFile(transcriptPath)).split("\n").filter(Boolean)) {
-      try {
-        const entry = JSON.parse(line) as Record<string, unknown>;
-        const s = entry.source as string;
-        const type = entry.type as string;
-        const content = normalizeGeminiContent(entry.content);
-        const timestamp = entry.created_at ? new Date(entry.created_at as string).toISOString() : new Date().toISOString();
-        const id = `gemini-${index++}`;
-        if (s === "USER_EXPLICIT" && type === "USER_INPUT") {
-          const cleaned = extractUserRequest(content);
-          if (cleaned) result.push({ id, role: "user", content: cleaned, timestamp, source: "gemini" });
-        } else if (s === "MODEL" && type === "PLANNER_RESPONSE") {
-          const toolCalls: ToolCall[] = ((entry.tool_calls as GeminiToolCall[]) || []).map((tc) => ({ name: tc.name || "unknown", input: tc.args || {} }));
-          if (content || toolCalls.length) result.push({ id, role: "assistant", content, timestamp, toolCalls: toolCalls.length ? toolCalls : undefined, source: "gemini" });
-        } else if (s === "MODEL" && ["LIST_DIRECTORY", "VIEW_FILE", "CODE_ACTION", "RUN_COMMAND"].includes(type)) {
-          // 工具结果配回最近未配对的 toolCall；配不到才独立成泡。
-          if (content && !pairToolOutputInMessages(result, content)) {
-            result.push({ id, role: "tool", content, timestamp, source: "gemini" });
-          }
-        }
-      } catch {}
-    }
-  } catch {}
-  return result;
+    text = await source.readFile(transcriptPath);
+  } catch {
+    return [];
+  }
+  const nir = parseAntigravityTranscript(text, { source: "gemini", id: conversationId });
+  if (!nir) return [];
+  return nirToConversation(nir, "gemini");
 }
 
-function normalizeGeminiContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map((c) => (typeof c === "string" ? c : JSON.stringify(c))).join("\n");
-  return content ? JSON.stringify(content) : "";
-}
-function extractUserRequest(content: string): string {
-  if (!content) return "";
-  const m = content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-  return m ? m[1].trim() : content.trim();
-}
 function cleanTitle(text: string, maxLength = 80): string {
   if (!text || text === "Untitled") return "Untitled";
   const firstLine = text.split("\n").find((l) => l.trim()) || "";

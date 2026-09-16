@@ -1,7 +1,8 @@
+import { parseCodexRollout } from "agent-session-format";
 import type { FileSource } from "../../electron/fs-source/types";
 import { join } from "../../electron/fs-source/util";
-import type { ConversationMessage, ToolCall, ToolSession } from "./types";
-import { attachToolOutput, pairToolOutputInMessages } from "./tool-pairing";
+import type { ConversationMessage, ToolSession } from "./types";
+import { nirToConversation } from "./nir-map";
 
 const ROOT = ".codex/sessions";
 
@@ -115,7 +116,6 @@ function extractCodexCwd(head: string): string | undefined {
 /** detect 卡片用的轻量计数：只 readDir 数 .jsonl 文件名，不 stat/不读文件内容。 */
 export async function countCodexSessions(source: FileSource): Promise<number> {
   if (!(await source.exists(ROOT))) return 0;
-  let n = 0;
   const countDir = async (dir: string): Promise<number> => {
     let entries;
     try {
@@ -129,139 +129,18 @@ export async function countCodexSessions(source: FileSource): Promise<number> {
     );
     return subCounts.reduce((a, b) => a + b, 0);
   };
-  n = await countDir(ROOT);
-  return n;
+  return countDir(ROOT);
 }
 
 export async function readCodexSession(source: FileSource, sessionId: string): Promise<ConversationMessage[]> {
   const hit = await findCodexSessionFile(source, sessionId);
   if (!hit) return [];
-  return parseCodexTranscript(await source.readFile(hit));
+  return parseCodexTranscript(await source.readFile(hit), sessionId);
 }
 
-/**
- * 解析 codex 风格的 jsonl 转录（rollout 事件流：response_item / 旧扁平格式）。
- * 纯函数：内容 → 消息列表，供 codex 与启发式发现的未知 agent 共用。
- */
-export function parseCodexTranscript(content: string): ConversationMessage[] {
-  const messages: ConversationMessage[] = [];
-  // 与 kimi 同一口径：assistant 侧按事件流累积，遇到下一条 user 消息或文件结束时 flush。
-  let bufText = "";
-  let bufThinking = "";
-  let bufToolCalls: ToolCall[] = [];
-  let bufTs = "";
-
-  const flush = () => {
-    if (!bufText.trim() && !bufThinking.trim() && !bufToolCalls.length) return;
-    messages.push({
-      id: `cx-asst-${messages.length}`,
-      role: "assistant",
-      content: bufText.trim(),
-      timestamp: bufTs || new Date().toISOString(),
-      thinking: bufThinking.trim() || undefined,
-      toolCalls: bufToolCalls.length ? bufToolCalls : undefined,
-      source: "codex",
-    });
-    bufText = "";
-    bufThinking = "";
-    bufToolCalls = [];
-    bufTs = "";
-  };
-
-  // function_call_output / custom_tool_call_output 按 call_id 配回对应 toolCall；
-  // 先找当前缓冲，再找已 flush 的消息（从后往前），防止跨 flush 边界漏配。
-  const pairOutput = (callId: unknown, output: unknown) => {
-    if (typeof callId !== "string" || !callId) return;
-    const out = typeof output === "string" ? output : JSON.stringify(output ?? "");
-    if (!attachToolOutput(bufToolCalls, out, callId)) {
-      pairToolOutputInMessages(messages, out, callId);
-    }
-  };
-
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    try {
-      const obj = JSON.parse(lines[i]);
-      const payload = obj.payload && typeof obj.payload === "object" ? obj.payload : obj;
-      const ts = obj.timestamp ? new Date(obj.timestamp as string).toISOString() : new Date().toISOString();
-
-      // 真实 rollout 格式：{"type":"response_item","payload":{...}}
-      if (obj.type === "response_item") {
-        if (payload.type === "message") {
-          if (payload.role === "developer") continue; // developer 注入的指令不进对话
-          const text = extractBlockText(payload.content);
-          if (payload.role === "user") {
-            // 真实文件首条 user 是 <environment_context> 包裹的环境信息，整条跳过
-            if (/^<environment_context>[\s\S]*<\/environment_context>$/.test(text.trim())) continue;
-            flush();
-            messages.push({ id: `cx-${i}`, role: "user", content: text, timestamp: ts, source: "codex" });
-          } else if (payload.role === "assistant") {
-            if (!bufTs) bufTs = ts;
-            if (text) bufText += text + "\n";
-          }
-        } else if (payload.type === "function_call") {
-          if (!bufTs) bufTs = ts;
-          bufToolCalls.push({
-            id: typeof payload.call_id === "string" ? payload.call_id : undefined,
-            name: typeof payload.name === "string" ? payload.name : "unknown",
-            input: parseToolArguments(payload.arguments),
-          });
-        } else if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
-          pairOutput(payload.call_id, payload.output);
-        } else if (payload.type === "custom_tool_call") {
-          if (!bufTs) bufTs = ts;
-          const name = typeof payload.name === "string" ? payload.name : "unknown";
-          const raw = typeof payload.input === "string" ? payload.input : JSON.stringify(payload.input ?? "");
-          bufToolCalls.push({
-            id: typeof payload.call_id === "string" ? payload.call_id : undefined,
-            name,
-            input: name === "apply_patch" ? { patch: raw } : { input: raw },
-          });
-        } else if (payload.type === "reasoning") {
-          // encrypted_content 无法解密；取 summary，空时退回明文的 reasoning_text 内容块。
-          const summary = extractBlockText(payload.summary) || extractBlockText(payload.content);
-          if (summary) {
-            if (!bufTs) bufTs = ts;
-            bufThinking += summary + "\n";
-          }
-        }
-        continue;
-      }
-
-      // 旧扁平格式：{type:"message", payload:{role, content:"..."}} 或 {payload:{role, content}}
-      const type = obj.type || payload.type || "";
-      const role = payload.role || type;
-      const text = payload.content || payload.text || payload.message || "";
-      if (role === "user" || type === "input" || (type === "message" && payload.role === "user")) {
-        flush();
-        messages.push({ id: `cx-${i}`, role: "user", content: typeof text === "string" ? text : JSON.stringify(text), timestamp: ts, source: "codex" });
-      } else if (role === "assistant" || type === "output" || (type === "message" && payload.role === "assistant")) {
-        flush();
-        messages.push({ id: `cx-${i}`, role: "assistant", content: typeof text === "string" ? text : JSON.stringify(text), timestamp: ts, source: "codex" });
-      }
-    } catch {}
-  }
-  flush();
-  return messages;
-}
-
-/** content 是 [{type:"input_text"|"output_text"|"summary_text", text}] 块列表，拼出纯文本。 */
-function extractBlockText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((b) => (b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string" ? (b as { text: string }).text : ""))
-    .filter(Boolean)
-    .join("\n");
-}
-
-/** function_call 的 arguments 是 JSON 字符串；解析失败就原样包进 { arguments }。 */
-function parseToolArguments(args: unknown): Record<string, unknown> {
-  if (typeof args !== "string") return (args as Record<string, unknown>) || {};
-  try {
-    const parsed = JSON.parse(args);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-  } catch {}
-  return { arguments: args };
+/** 解析 codex 风格的 jsonl 转录（rollout 事件流）：包解析出 NIR，再映射成视图模型。 */
+export function parseCodexTranscript(content: string, sessionId: string): ConversationMessage[] {
+  const nir = parseCodexRollout(content, { source: "codex", id: sessionId });
+  if (!nir) return [];
+  return nirToConversation(nir, "codex");
 }
