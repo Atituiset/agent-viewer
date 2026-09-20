@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-20
+
+### Changed
+
+- **Performance — session reads**: `agent-session-format` is now consumed
+  from the npm registry at `^0.2.0`, using its per-session sqlite read APIs
+  instead of whole-database copies.
+- **Dependency upgrades**: Next.js 16.3.5, React / React DOM 19.3.0,
+  better-sqlite3 13, Electron 44, vitest 5, jsdom 30, @types/node 26.
+  `typescript` stays on ^5 (typescript-eslint has no TS 7 support yet) and
+  `eslint` on ^9 (eslint-plugin-react has no ESLint 10 support yet); npm
+  overrides pin `node-abi` ^4.35.0 (Electron 44 ABI) and `nan` ^2.29.0
+  (Electron 44's V8 tagged-External API) so native module rebuilds work.
+- **CI/CD**: GitHub Actions major upgrades — checkout / setup-node /
+  upload-artifact v7, download-artifact v8, action-gh-release v3.
+
+### Fixed
+
+- Linux packaging now points electron-builder at `build/icon.png`.
+
 ## [0.6.1] - 2026-09-09
 
 ### Fixed
