@@ -5,6 +5,7 @@ import { findCodexSessionFile } from "../src/lib/codex";
 import { join } from "../electron/fs-source/util";
 import type { DetectedTool, MachineConfig } from "../src/lib/types";
 import { getSources, disposeSource } from "./source-manager";
+import { discoverWslMachines, invalidateWslMachinesCache } from "./wsl-machines";
 
 function ok<T>(v: T) {
   return { data: v };
@@ -13,8 +14,16 @@ function err(e: unknown) {
   return { error: String(e) };
 }
 
-function machineById(id: string): MachineConfig {
-  const m = loadMachines().find((x) => x.id === id);
+/** 持久化/ssh-config 机器 ∪ 自动发现的 WSL 机器（后者不覆盖已有 id）。 */
+async function listAllMachines(): Promise<MachineConfig[]> {
+  const machines = loadMachines();
+  const seen = new Set(machines.map((m) => m.id));
+  const wsl = (await discoverWslMachines()).filter((m) => !seen.has(m.id));
+  return [...machines, ...wsl];
+}
+
+async function machineById(id: string): Promise<MachineConfig> {
+  const m = (await listAllMachines()).find((x) => x.id === id);
   if (!m) throw new Error("machine not found: " + id);
   return m;
 }
@@ -125,7 +134,7 @@ async function locateSource(
 }
 
 export function registerIpc() {
-  ipcMain.handle("machines:list", () => ok(loadMachines().map(publicMachine)));
+  ipcMain.handle("machines:list", async () => ok((await listAllMachines()).map(publicMachine)));
   ipcMain.handle("machines:add", (_e, cfg) => {
     try {
       if (
@@ -144,6 +153,7 @@ export function registerIpc() {
   ipcMain.handle("machines:remove", async (_e, id) => {
     try {
       removeMachine(id);
+      invalidateWslMachinesCache();
       await disposeSource(id);
       return ok({ ok: true });
     } catch (e) {
@@ -157,7 +167,7 @@ export function registerIpc() {
 
   ipcMain.handle("tools:detect", async (_e, machineId) => {
     try {
-      return ok(await detectAcross(await getSources(machineById(machineId))));
+      return ok(await detectAcross(await getSources(await machineById(machineId))));
     } catch (e) {
       return err(e);
     }
@@ -165,7 +175,7 @@ export function registerIpc() {
 
   ipcMain.handle("sessions:list", async (_e, machineId, toolId) => {
     try {
-      const sources = await getSources(machineById(machineId));
+      const sources = await getSources(await machineById(machineId));
       const tool = getTool(toolId);
       const lists = await Promise.all(sources.map((s) => tool.listSessions(s).catch(() => [])));
       const seen = new Set<string>();
@@ -185,7 +195,7 @@ export function registerIpc() {
 
   ipcMain.handle("sessions:stamp", async (_e, machineId, toolId, sessionId, projectPath) => {
     try {
-      const sources = await getSources(machineById(machineId));
+      const sources = await getSources(await machineById(machineId));
       for (const src of sources) {
         const stamp = await sessionStamp(src, toolId, sessionId, projectPath);
         if (stamp !== null) return ok(stamp);
@@ -198,7 +208,7 @@ export function registerIpc() {
 
   ipcMain.handle("sessions:read", async (_e, machineId, toolId, sessionId, projectPath) => {
     try {
-      const sources = await getSources(machineById(machineId));
+      const sources = await getSources(await machineById(machineId));
       const tool = getTool(toolId);
       // 先按文件指纹定位到具体的 source；定位不到（opencode sqlite / hermes）逐 source 尝试。
       const located = await locateSource(sources, toolId, sessionId, projectPath);

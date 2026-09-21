@@ -34,7 +34,7 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
               key={m.id}
               role="button"
               tabIndex={0}
-              aria-label={`${m.name} (${m.user}@${m.host}:${m.port})`}
+              aria-label={m.type === "wsl" ? `${m.name} (WSL)` : `${m.name} (${m.user}@${m.host}:${m.port})`}
               className="group relative rounded-xl border border-[var(--sidebar-border)] bg-zinc-900/60 hover:bg-zinc-900/90 hover:border-zinc-600 transition-all cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onSelect(m)}
               onKeyDown={(e) => {
@@ -48,14 +48,14 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg ${
-                      m.type === "local" ? "bg-emerald-900/30" : "bg-blue-900/30"
+                      m.type === "local" ? "bg-emerald-900/30" : m.type === "wsl" ? "bg-amber-900/30" : "bg-blue-900/30"
                     }`}>
-                      {m.type === "local" ? "🏠" : "🖥️"}
+                      {m.type === "local" ? "🏠" : m.type === "wsl" ? "🐧" : "🖥️"}
                     </div>
                     <div>
                       <h3 className="text-base font-semibold text-zinc-200">{m.name}</h3>
                       <p className="text-xs text-zinc-500 mt-0.5">
-                        {m.type === "local" ? t("machines.local") : `${m.user}@${m.host}:${m.port}`}
+                        {m.type === "local" ? t("machines.local") : m.type === "wsl" ? `WSL · ${m.user}` : `${m.user}@${m.host}:${m.port}`}
                       </p>
                     </div>
                   </div>
@@ -70,12 +70,12 @@ export default function MachineCards({ machines, onSelect, onRemove }: Props) {
                   {m.auto && (
                     <span
                       className="px-2 py-0.5 rounded bg-zinc-800/50 text-zinc-500 tracking-wider font-medium"
-                      title={t("machines.autoHint")}
+                      title={m.type === "wsl" ? t("machines.wslAutoHint") : t("machines.autoHint")}
                     >
                       auto
                     </span>
                   )}
-                  <span>{m.host}</span>
+                  <span>{m.type === "wsl" ? m.distro : m.host}</span>
                 </div>
               </div>
               {m.type !== "local" && (

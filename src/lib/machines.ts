@@ -135,6 +135,11 @@ function loadHiddenAuto(): string[] {
   }
 }
 
+/** auto 机器（ssh-config / WSL 发现）共用的 tombstone 查询。 */
+export function isAutoHidden(id: string): boolean {
+  return loadHiddenAuto().includes(id);
+}
+
 function hideAuto(id: string) {
   ensureConfigDir();
   atomicWrite(hiddenAutoFile(), JSON.stringify([...new Set([...loadHiddenAuto(), id])], null, 2));
@@ -168,7 +173,8 @@ export function removeMachine(id: string) {
   const target = all.find((m) => m.id === id);
   saveMachines(all.filter((m) => m.id !== id));
   // 自动发现的机器不在 machines.json 里，记 tombstone 防止下次又出现。
-  if (target?.auto) hideAuto(id);
+  // WSL 机器同样不落盘，loadMachines 里找不到 —— 找不到也记 tombstone（对无效 id 无害）。
+  if (!target || target.auto) hideAuto(id);
 }
 
 export function getDefaultMachines(): MachineConfig[] {

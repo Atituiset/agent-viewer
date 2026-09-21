@@ -4,8 +4,10 @@ export interface MachineConfig {
   host: string;
   user: string;
   port: number;
-  type: "local" | "ssh";
+  type: "local" | "ssh" | "wsl";
   authMethod: "sshKey" | "password";
+  /** type === "wsl" 时的 distro 名；此时 host 存解析好的 UNC home，user 是 Linux 用户名。 */
+  distro?: string;
   sshKey?: string;
   password?: string;
   status: "online" | "offline" | "unknown";

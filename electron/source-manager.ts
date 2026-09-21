@@ -1,8 +1,7 @@
 import type { MachineConfig } from "../src/lib/types";
-import { TOOLS } from "../src/lib/registry";
 import { LocalFileSource } from "./fs-source/local";
 import { SshFileSource } from "./fs-source/ssh";
-import { listWslHomes, WslFileSource } from "./fs-source/wsl";
+import { WslFileSource } from "./fs-source/wsl";
 import type { FileSource } from "./fs-source/types";
 
 const cache = new Map<string, FileSource>();
@@ -17,7 +16,10 @@ export function getSource(machine: MachineConfig): Promise<FileSource> {
 
   const p = (async (): Promise<FileSource> => {
     let source: FileSource;
-    if (machine.type === "local" || machine.host === "localhost") {
+    if (machine.type === "wsl") {
+      // host 存的是发现阶段解析好的 UNC home（见 wsl-machines.ts）。
+      source = new WslFileSource(machine.host, machine.distro ?? "");
+    } else if (machine.type === "local" || machine.host === "localhost") {
       source = new LocalFileSource();
     } else {
       const ssh = new SshFileSource({
@@ -42,39 +44,16 @@ export function getSource(machine: MachineConfig): Promise<FileSource> {
   return p;
 }
 
-const multiCache = new Map<string, FileSource[]>();
-
 /**
- * local 机器在 win32 上聚合「Windows home + 所有 WSL distro home」——
- * agent 装在 WSL 里时 session 文件在 \\wsl$\... 下，单扫 Windows home 会漏/归零。
- * WSL home 只保留至少命中一个工具 detectPaths 的，避免空 distro 拖慢 detect。
+ * 每台机器一个 source。WSL distro 不再并入本机——它们由 wsl-machines.ts
+ * 自动发现为独立的 wsl 机器（卡片上 Windows 与 WSL 数据各自分开）。
  */
 export async function getSources(machine: MachineConfig): Promise<FileSource[]> {
-  const primary = await getSource(machine);
-  if (machine.type !== "local" && machine.host !== "localhost") return [primary];
-
-  const cached = multiCache.get(machine.id);
-  if (cached) return cached;
-
-  const sources = [primary];
-  for (const { home, distro } of await listWslHomes()) {
-    const src = new WslFileSource(home, distro);
-    try {
-      // 全部 detectPaths 一次批量探测（不存在 existsBatch 的环境回退逐个 exists）。
-      const paths = TOOLS.flatMap((t) => t.detectPaths);
-      const present = src.existsBatch
-        ? await src.existsBatch(paths).catch(() => paths.map(() => false))
-        : await Promise.all(paths.map((p) => src.exists(p).catch(() => false)));
-      if (present.some(Boolean)) sources.push(src);
-    } catch {}
-  }
-  multiCache.set(machine.id, sources);
-  return sources;
+  return [await getSource(machine)];
 }
 
 export async function disposeSource(machineId: string): Promise<void> {
   inflight.delete(machineId);
-  multiCache.delete(machineId);
   const s = cache.get(machineId);
   if (s) {
     try {

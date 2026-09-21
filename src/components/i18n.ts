@@ -26,6 +26,7 @@ const en = {
   "machines.empty.body": "Add a machine via SSH or open this app locally.",
   "machines.local": "Local machine",
   "machines.autoHint": "Discovered from ~/.ssh/config",
+  "machines.wslAutoHint": "Discovered from local WSL distros",
   "machines.remove": "Remove machine",
 
   // ToolCards
@@ -123,6 +124,7 @@ const zh: Record<MsgKey, string> = {
   "machines.empty.body": "通过 SSH 添加一台远程机器，或直接查看本机。",
   "machines.local": "本机",
   "machines.autoHint": "从 ~/.ssh/config 自动发现",
+  "machines.wslAutoHint": "从本机 WSL 发行版自动发现",
   "machines.remove": "移除机器",
 
   "tools.title": "Agent 工具",
