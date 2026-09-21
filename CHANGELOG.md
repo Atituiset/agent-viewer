@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-21
+
 ### Added
 
 - **WSL distros get their own machine cards**: on Windows, each WSL distro
@@ -17,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   points — mid-session model changes (e.g. `/model` swaps) surface as
   `m1 → m2` in the session header and a new badge at the switch bubble.
   Swimlane view tracks switch points per lane.
+
+### Fixed
+
+- **Kimi session list sorts by last activity** (`updatedAt`), not session
+  creation time — a long-running session active right now no longer sinks
+  below freshly-created idle sessions (matches the mtime semantics already
+  used for claude/codex).
 
 ## [0.7.0] - 2026-09-20
 
