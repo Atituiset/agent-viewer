@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **WSL distros get their own machine cards**: on Windows, each WSL distro
+  with agent data now appears as a separate auto-discovered machine instead
+  of being merged invisibly into the local machine's session list.
+- **Per-message model display**: assistant bubbles carry the model that
+  produced them (from the transcript), shown as a badge only at model-switch
+  points — mid-session model changes (e.g. `/model` swaps) surface as
+  `m1 → m2` in the session header and a new badge at the switch bubble.
+  Swimlane view tracks switch points per lane.
+
 ## [0.7.0] - 2026-09-20
 
 ### Changed

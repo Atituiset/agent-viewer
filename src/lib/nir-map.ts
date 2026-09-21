@@ -33,14 +33,19 @@ export function nirToConversation(session: NirSession, source: string): Conversa
       content: "",
       timestamp: m.timestamp ?? new Date().toISOString(),
       source,
+      model: m.model ?? null,
       ...laneProps(m),
     };
     out.push(cur);
     return cur;
   };
 
+  // 模型变化与 role/泳道变化同级：封口气泡另起新泡，让切换点落在气泡边界上。
   const mergeable = (m: NirMessage): boolean =>
-    !!cur && cur.role === m.role && (cur.agent ?? null) === laneOf(m);
+    !!cur &&
+    cur.role === m.role &&
+    (cur.agent ?? null) === laneOf(m) &&
+    (cur.model ?? null) === (m.model ?? null);
 
   for (const m of session.messages) {
     if (m.role === "tool") {

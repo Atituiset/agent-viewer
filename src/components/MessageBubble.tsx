@@ -10,6 +10,8 @@ interface Props {
   message: ConversationMessage;
   /** 摘要模式：长文折叠、工具调用合并为一行、thinking 隐藏。 */
   compact?: boolean;
+  /** 是否显示模型徽章（父级按「与前一 assistant 气泡不同」控制，默认 true）。 */
+  showModel?: boolean;
 }
 
 const SOURCE_STYLES: Record<string, { color: string; label: string }> = {
@@ -27,7 +29,7 @@ const SOURCE_STYLES: Record<string, { color: string; label: string }> = {
 const CLAMP_CHARS = 600;
 
 /** memo：虚拟滚动回扫 + LIVE 刷新时，内容未变的气泡不重渲染（markdown 重解析很贵）。 */
-const MessageBubble = memo(function MessageBubble({ message, compact }: Props) {
+const MessageBubble = memo(function MessageBubble({ message, compact, showModel = true }: Props) {
   const t = useT();
   const [showThinking, setShowThinking] = useState(false);
   const [expandContent, setExpandContent] = useState(false);
@@ -64,6 +66,11 @@ const MessageBubble = memo(function MessageBubble({ message, compact }: Props) {
           {message.agentLabel && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-300 border border-indigo-800/40">
               {message.agentLabel}
+            </span>
+          )}
+          {message.role === "assistant" && message.model && showModel && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-400 border border-zinc-700/40">
+              {message.model}
             </span>
           )}
           <span className="text-[10px] text-zinc-600">

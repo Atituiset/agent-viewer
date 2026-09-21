@@ -42,6 +42,29 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
     return messages.filter((_, i) => haystacks[i].includes(q));
   }, [messages, search, haystacks]);
 
+  // 模型徽章只在切换点显示：assistant 气泡的 model 与上一个 assistant 气泡不同
+  // （或是首个 assistant 气泡）才加入集合，连续同模型回复不重复打标。
+  const modelSwitchIds = useMemo(() => {
+    const ids = new Set<string>();
+    let prev: string | null | undefined;
+    for (const m of messages) {
+      if (m.role !== "assistant") continue;
+      const model = m.model ?? null;
+      if (prev === undefined || model !== prev) ids.add(m.id);
+      prev = model;
+    }
+    return ids;
+  }, [messages]);
+
+  // 会话级模型：从消息聚合 distinct model（保持出现顺序），中途切换显示为 m1 → m2。
+  const sessionModels = useMemo(() => {
+    const models: string[] = [];
+    for (const m of messages) {
+      if (m.role === "assistant" && m.model && !models.includes(m.model)) models.push(m.model);
+    }
+    return models;
+  }, [messages]);
+
   const currentSessionId = sessionMeta?.id ?? null;
   useEffect(() => {
     if (currentSessionId !== prevSessionIdRef.current) {
@@ -74,7 +97,9 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
                 {tool.name}
               </span>
             )}
-            {sessionMeta.model && <span>{t("conv.meta.model")} {sessionMeta.model}</span>}
+            {(sessionModels.length > 0 || sessionMeta.model) && (
+              <span>{t("conv.meta.model")} {sessionModels.length > 0 ? sessionModels.join(" → ") : sessionMeta.model}</span>
+            )}
             {sessionMeta.tokensInput != null && <span>{t("conv.meta.input")} {sessionMeta.tokensInput.toLocaleString()}</span>}
             {sessionMeta.tokensOutput != null && <span>{t("conv.meta.output")} {sessionMeta.tokensOutput.toLocaleString()}</span>}
             {sessionMeta.cost != null && sessionMeta.cost > 0 && <span>{t("conv.meta.cost")} ${sessionMeta.cost.toFixed(4)}</span>}
@@ -172,7 +197,7 @@ export default function ConversationView({ messages, sessionMeta, tool, error }:
                   paddingBottom: 20, // 原 space-y-5 的行间距
                 }}
               >
-                <MessageBubble message={filtered[vi.index]} compact={compact} />
+                <MessageBubble message={filtered[vi.index]} compact={compact} showModel={modelSwitchIds.has(filtered[vi.index].id)} />
               </div>
             ))}
           </div>

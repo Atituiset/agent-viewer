@@ -68,6 +68,21 @@ export default function SwimlaneView({ messages, compact }: Props) {
 
   const laneIndex = useMemo(() => new Map(lanes.map((l, i) => [l.id, i])), [lanes]);
 
+  // 模型徽章只在切换点显示：每条泳道各自跟踪上一个 assistant 节点的 model
+  // （不同泳道可能用不同模型），与上一个不同或是该泳道首个 assistant 节点才打标。
+  const modelSwitchIds = useMemo(() => {
+    const ids = new Set<string>();
+    const prevByLane = new Map<string, string | null>();
+    for (const m of sorted) {
+      if (m.role !== "assistant") continue;
+      const lane = laneOf(m);
+      const model = m.model ?? null;
+      if (!prevByLane.has(lane) || prevByLane.get(lane) !== model) ids.add(m.id);
+      prevByLane.set(lane, model);
+    }
+    return ids;
+  }, [sorted]);
+
   // 列几何：x 方向不用量 DOM。cols[i] = 第 i 泳道的 left/center/width。
   const geometry = useMemo(() => {
     let x = 0;
@@ -174,7 +189,7 @@ export default function SwimlaneView({ messages, compact }: Props) {
                   paddingBottom: ROW_GAP,
                 }}
               >
-                <LaneNode msg={m} compact={compact} />
+                <LaneNode msg={m} compact={compact} showModel={modelSwitchIds.has(m.id)} />
               </div>
             );
           })}
@@ -248,7 +263,7 @@ function ToolCallRows({ toolCalls }: { toolCalls: NonNullable<ConversationMessag
 }
 
 /** memo：虚拟滚动回扫时不重渲染未变节点（内部含 markdown 解析）。 */
-const LaneNode = memo(function LaneNode({ msg, compact }: { msg: ConversationMessage; compact?: boolean }) {
+const LaneNode = memo(function LaneNode({ msg, compact, showModel }: { msg: ConversationMessage; compact?: boolean; showModel?: boolean }) {
   const t = useT();
   const [xContent, setXContent] = useState(false);
   const [xThink, setXThink] = useState(false);
@@ -263,6 +278,11 @@ const LaneNode = memo(function LaneNode({ msg, compact }: { msg: ConversationMes
         {msg.agentLabel && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-300 border border-indigo-800/40 truncate">
             {msg.agentLabel}
+          </span>
+        )}
+        {msg.role === "assistant" && msg.model && showModel && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-400 border border-zinc-700/40 truncate">
+            {msg.model}
           </span>
         )}
         <span className="text-[10px] text-zinc-600 ml-auto flex-shrink-0">

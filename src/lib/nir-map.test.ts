@@ -98,4 +98,41 @@ describe("nirToConversation（NIR → 视图模型映射）", () => {
     expect(out[0].toolCalls?.[0].input).toEqual({ raw: "***" });
     expect(out[0].timestamp).toBeTruthy();
   });
+
+  it("carries the NIR message model onto the bubble", () => {
+    const out = nirToConversation(
+      sessionOf([
+        msg({ role: "user", content: "q", model: "claude-sonnet-4-5" }),
+        msg({ role: "assistant", content: "a", model: "claude-sonnet-4-5" }),
+      ]),
+      "test"
+    );
+    expect(out[0].model).toBe("claude-sonnet-4-5");
+    expect(out[1].model).toBe("claude-sonnet-4-5");
+  });
+
+  it("seals the bubble on model change even when role and lane match", () => {
+    const out = nirToConversation(
+      sessionOf([
+        msg({ role: "assistant", content: "from sonnet", model: "claude-sonnet-4-5" }),
+        msg({ role: "assistant", content: "from opus", model: "claude-opus-4-1" }),
+      ]),
+      "test"
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ content: "from sonnet", model: "claude-sonnet-4-5" });
+    expect(out[1]).toMatchObject({ content: "from opus", model: "claude-opus-4-1" });
+  });
+
+  it("still merges adjacent messages when model is null on both sides", () => {
+    const out = nirToConversation(
+      sessionOf([
+        msg({ role: "assistant", thinking: "hmm" }),
+        msg({ role: "assistant", content: "done" }),
+      ]),
+      "test"
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].model).toBeNull();
+  });
 });

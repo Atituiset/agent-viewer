@@ -50,4 +50,19 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={msg} compact />);
     expect(screen.getByText(/1 次调用: Bash/)).toBeInTheDocument();
   });
+
+  it("assistant 气泡显示模型徽章", () => {
+    render(<MessageBubble message={{ ...base, model: "claude-sonnet-4-5" }} />);
+    expect(screen.getByText("claude-sonnet-4-5")).toBeInTheDocument();
+  });
+
+  it("showModel=false 时不显示模型徽章", () => {
+    render(<MessageBubble message={{ ...base, model: "claude-sonnet-4-5" }} showModel={false} />);
+    expect(screen.queryByText("claude-sonnet-4-5")).not.toBeInTheDocument();
+  });
+
+  it("user 气泡不显示模型徽章", () => {
+    render(<MessageBubble message={{ ...base, role: "user", model: "claude-sonnet-4-5" }} />);
+    expect(screen.queryByText("claude-sonnet-4-5")).not.toBeInTheDocument();
+  });
 });

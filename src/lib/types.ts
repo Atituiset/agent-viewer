@@ -141,6 +141,8 @@ export interface ConversationMessage {
   agent?: string;
   /** 泳道显示名（如 "Explore · 分析工具链"）。 */
   agentLabel?: string;
+  /** 产生该气泡时所用的模型；null/缺省 = 转录未记录。模型切换会使气泡封口另起新泡。 */
+  model?: string | null;
 }
 
 export interface ToolCall {
