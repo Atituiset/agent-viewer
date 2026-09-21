@@ -53,7 +53,9 @@ export async function listKimiSessions(source: FileSource): Promise<ToolSession[
                 return {
                   id: state.id || sess.name,
                   title: state.title || state.lastPrompt || "Untitled",
-                  createdAt: new Date(state.createdAt || Date.now()).toISOString(),
+                  // 与 claude/codex 的 mtime 口径一致：按最后活跃时间排序，
+                  // 长会话一直更新 updatedAt，不会因为创建时间早而沉底。
+                  createdAt: new Date(state.updatedAt || state.createdAt || Date.now()).toISOString(),
                   messageCount,
                   project: state.cwd || state.workDir || undefined,
                 };

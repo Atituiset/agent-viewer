@@ -45,6 +45,22 @@ describe("kimi parser", () => {
     expect(await listKimiSessions(src)).toEqual([]);
   });
 
+  it("sorts by updatedAt (last activity), not createdAt, so long-running sessions float up", async () => {
+    const OLD_BUT_ACTIVE = "session_aaaaaaaa-0000-0000-0000-000000000000";
+    const NEW_BUT_IDLE = "session_bbbbbbbb-0000-0000-0000-000000000000";
+    const WD = ".kimi-code/sessions/wd_proj-a1b2c3d4e5f6";
+    const state = (id: string, createdAt: number, updatedAt: number) =>
+      JSON.stringify({ id, cwd: "/p", title: id.slice(8, 12), archived: false, createdAt, updatedAt });
+    const src = new FakeFileSource()
+      .add(`${WD}/${OLD_BUT_ACTIVE}/state.json`, state(OLD_BUT_ACTIVE, 1000, 9000))
+      .add(`${WD}/${OLD_BUT_ACTIVE}/agents/main/wire.jsonl`, WIRE)
+      .add(`${WD}/${NEW_BUT_IDLE}/state.json`, state(NEW_BUT_IDLE, 5000, 5000))
+      .add(`${WD}/${NEW_BUT_IDLE}/agents/main/wire.jsonl`, WIRE);
+    const sessions = await listKimiSessions(src);
+    expect(sessions.map((s) => s.id)).toEqual([OLD_BUT_ACTIVE, NEW_BUT_IDLE]);
+    expect(sessions[0].createdAt).toBe(new Date(9000).toISOString());
+  });
+
   it("reads user messages and accumulates assistant loop events", async () => {
     const src = new FakeFileSource()
       .add(`${BASE}/state.json`, STATE)
