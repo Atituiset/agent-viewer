@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-22
+
+### Fixed
+
+- **Thinking is reachable in waterfall compact mode**: the toggle was
+  gated to full density, so thinking content was only ever visible in
+  swimlane view. The collapse/expand button now appears in both densities.
+- **Subagent bubbles stand out in waterfall view**: they previously
+  blended into the main flow with only a small label badge; assistant
+  bubbles from subagent lanes now get an indent and an indigo left accent.
+
 ## [0.8.1] - 2026-09-22
 
 ### Added
