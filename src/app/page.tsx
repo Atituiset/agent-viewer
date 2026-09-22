@@ -34,6 +34,7 @@ export default function Home() {
   // 机器操作（添加/删除）失败可见化，不再静默吞掉。
   const [machinesError, setMachinesError] = useState<string | null>(null);
   const [addMachineError, setAddMachineError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // LIVE 轮询在途标记：防止慢连接上 setInterval 重入。
   const pollInFlightRef = useRef(false);
@@ -43,6 +44,7 @@ export default function Home() {
     window.api.tools.meta().then((r) => {
       if (r.data) toolMetaRef.current = new Map(r.data.map((t) => [t.id, t.requiresProjectPath]));
     }).catch(() => {});
+    window.api.app.meta().then((r) => { if (r.data) setAppVersion(r.data.version); }).catch(() => {});
   }, []);
 
   const projectPathFor = useCallback((toolId: string, session: ToolSession): string | undefined =>
@@ -256,6 +258,11 @@ export default function Home() {
           >
             {getLocale() === "zh" ? "EN" : "中文"}
           </button>
+          {appVersion && (
+            <span className="text-[10px] text-zinc-700 select-none" title={t("nav.version")}>
+              v{appVersion}
+            </span>
+          )}
         </div>
       </nav>
 

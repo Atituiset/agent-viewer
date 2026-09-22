@@ -3,6 +3,7 @@ import path from "path";
 import { registerIpc } from "./ipc";
 import { disposeAll } from "./source-manager";
 import { ensureDefaultMachine } from "./bootstrap";
+import { setupAutoUpdater } from "./updater";
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -58,6 +59,7 @@ app.whenReady().then(async () => {
   ensureDefaultMachine();
   registerIpc();
   createWindow();
+  setupAutoUpdater();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

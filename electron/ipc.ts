@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { loadMachinesCached as loadMachines, addMachine, removeMachine } from "../src/lib/machines";
 import { detectTools, getTool, TOOLS } from "../src/lib/detect";
 import { findCodexSessionFile } from "../src/lib/codex";
@@ -134,6 +134,9 @@ async function locateSource(
 }
 
 export function registerIpc() {
+  // 应用自身信息：版本号展示在导航栏角落；packaged 标记渲染层目前用不到，一并下发备用。
+  ipcMain.handle("app:meta", async () => ok({ version: app.getVersion(), packaged: app.isPackaged }));
+
   ipcMain.handle("machines:list", async () => ok((await listAllMachines()).map(publicMachine)));
   ipcMain.handle("machines:add", (_e, cfg) => {
     try {

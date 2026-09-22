@@ -97,12 +97,20 @@
       "installerSidebar": "build/installerSidebar.bmp",
       "uninstallerSidebar": "build/installerSidebar.bmp",
       "artifactName": "${productName} Setup ${version}.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Atituiset",
+        "repo": "agent-viewer"
+      }
+    ]
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
     "agent-session-format": "^0.2.0",
     "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.9",
     "next": "16.3.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",

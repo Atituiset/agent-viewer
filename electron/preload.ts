@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { MachineConfig, DetectedTool, ToolSession, ConversationMessage } from "../src/lib/types";
 
 const api = {
+  app: {
+    /** 应用自身信息（版本号等），导航栏角落展示用。 */
+    meta: (): Promise<{ data?: { version: string; packaged: boolean }; error?: string }> =>
+      ipcRenderer.invoke("app:meta"),
+  },
   machines: {
     list: (): Promise<{ data?: MachineConfig[]; error?: string }> => ipcRenderer.invoke("machines:list"),
     add: (cfg: Omit<MachineConfig, "id" | "status">): Promise<{ data?: MachineConfig; error?: string }> =>

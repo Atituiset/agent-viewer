@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-update via electron-updater**: packaged builds check GitHub
+  Releases in the background on launch, download silently, and offer a
+  restart-to-update prompt when ready (Windows/macOS/Linux; unsigned macOS
+  builds skip gracefully). Previously `latest.yml` was published but no
+  client ever consumed it.
+- **Version display**: the nav bar now shows the running app version
+  (`v{version}`), so manual/dev builds are distinguishable from releases.
+
 ## [0.8.0] - 2026-09-21
 
 ### Added

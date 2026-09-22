@@ -18,6 +18,7 @@ const en = {
   "nav.loading": "Loading…",
   "nav.live": "LIVE",
   "nav.refresh": "Refresh",
+  "nav.version": "App version",
 
   // MachineCards
   "machines.title": "Machines",
@@ -117,6 +118,7 @@ const zh: Record<MsgKey, string> = {
   "nav.loading": "加载中…",
   "nav.live": "LIVE",
   "nav.refresh": "刷新",
+  "nav.version": "应用版本",
 
   "machines.title": "机器",
   "machines.subtitle": "选择一台机器查看其上的 agent 会话。",
