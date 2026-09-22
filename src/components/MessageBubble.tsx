@@ -47,7 +47,9 @@ const MessageBubble = memo(function MessageBubble({ message, compact, showModel 
   };
 
   return (
-    <div className={`${isUser ? "ml-auto max-w-[88%]" : "mr-auto max-w-full"}`}>
+    <div className={`${isUser ? "ml-auto max-w-[88%]" : "mr-auto max-w-full"} ${
+      message.agent && !isUser ? "ml-6 border-l-2 border-indigo-800/50 pl-3" : ""
+    }`}>
       <div
         className={`rounded-xl px-5 py-3.5 ${
           isUser
@@ -78,7 +80,7 @@ const MessageBubble = memo(function MessageBubble({ message, compact, showModel 
           </span>
         </div>
 
-        {!compact && message.thinking && (
+        {message.thinking && (
           <div className="mb-3">
             <button
               onClick={() => setShowThinking(!showThinking)}

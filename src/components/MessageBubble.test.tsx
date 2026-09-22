@@ -65,4 +65,17 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={{ ...base, role: "user", model: "claude-sonnet-4-5" }} />);
     expect(screen.queryByText("claude-sonnet-4-5")).not.toBeInTheDocument();
   });
+
+  it("compact 模式也提供思考过程展开按钮", () => {
+    render(<MessageBubble message={{ ...base, thinking: "让我想想" }} compact />);
+    expect(screen.getByRole("button", { name: /Thinking|思考/ })).toBeInTheDocument();
+    // 默认收起，点击后可见内容
+    expect(screen.queryByText("让我想想")).not.toBeInTheDocument();
+  });
+
+  it("subagent 气泡带泳道缩进与侧边标识", () => {
+    const { container } = render(<MessageBubble message={{ ...base, agent: "agent-0", agentLabel: "explore · agent-0" }} />);
+    expect(container.firstChild).toHaveClass("ml-6", "border-l-2", "border-indigo-800/50");
+    expect(screen.getByText("explore · agent-0")).toBeInTheDocument();
+  });
 });
