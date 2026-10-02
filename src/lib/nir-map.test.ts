@@ -1,20 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { makeNirSession, type NirMessage } from "agent-session-format";
+import { makeMsg, makeNirSession, type NirMessage } from "agent-session-format";
 import { nirToConversation } from "./nir-map";
 
+// Built through asf's own makeMsg rather than a hand-written literal: that is the
+// constructor that derives toolTarget, so a fixture typed as NirMessage stays
+// correct as the schema gains fields. Writing the literal by hand meant this file
+// broke on 0.8.0's toolTarget — the type error was the schema doing its job.
 function msg(partial: Partial<NirMessage> & { role: NirMessage["role"] }): NirMessage {
-  return {
-    content: "",
-    timestamp: "2026-01-01T00:00:00Z",
-    toolName: null,
-    toolInput: null,
-    toolCallId: null,
-    model: null,
-    thinking: null,
-    agent: null,
-    agentLabel: null,
-    ...partial,
-  };
+  return makeMsg(partial);
 }
 
 function sessionOf(messages: NirMessage[]) {
