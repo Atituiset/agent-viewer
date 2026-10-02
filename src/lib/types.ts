@@ -145,12 +145,40 @@ export interface ConversationMessage {
   model?: string | null;
 }
 
+/**
+ * Outcome of a tool call, as reported by the source format.
+ *
+ * Mirrors NIR's `NirToolResult["status"]` deliberately rather than inventing a
+ * viewer-specific vocabulary: the previous free-form `status?: string` was
+ * compared against `"completed"` in the UI while every producer emitted
+ * `"success"`, so the badge could never render and the type system could not
+ * catch it.
+ *
+ * The values mean what they say. `cancelled` is a command that was cut off
+ * without reporting failure — not an error.
+ */
+export type ToolStatus = "success" | "error" | "cancelled" | "unknown";
+
 export interface ToolCall {
   id?: string;
   name: string;
   input: Record<string, unknown>;
   output?: string;
-  status?: string;
+  /**
+   * Outcome reported by the source. OMITTED — not `"unknown"` — when the source
+   * format said nothing at all: an unlabelled call is not a call that failed, and
+   * showing a badge for it would assert a fact nobody reported. This distinction
+   * is why `status` stays optional instead of defaulting.
+   */
+  status?: ToolStatus;
+  /** Verbatim provider error text, when the source exposed one. */
+  errorText?: string;
+  /**
+   * How the outcome was obtained. `source_*` means the source stated it;
+   * `derived` means it was inferred from output text, which is weaker evidence and
+   * is rendered differently so a reader never mistakes a guess for a report.
+   */
+  verdictMethod?: "source_is_error" | "source_status" | "derived";
 }
 
 export interface SessionDetail {

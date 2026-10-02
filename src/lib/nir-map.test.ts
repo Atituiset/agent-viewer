@@ -136,3 +136,92 @@ describe("nirToConversation（NIR → 视图模型映射）", () => {
     expect(out[0].model).toBeNull();
   });
 });
+
+/**
+ * 结局透传（NIR 0.5+ 的 toolResult）。
+ *
+ * 这些用例守护的是一个静默 bug：映射层此前只读 m.content，把 toolResult 整个丢掉，
+ * 于是「失败的调用」和「成功的长输出」在 UI 上完全一样。徽章从来没显示过——UI 比对的是
+ * "completed"，而 NIR 一直发 "success"，加上 status 当时是自由 string，类型系统也拦不住。
+ */
+describe("nirToConversation：工具结局透传", () => {
+  function pair(verdict?: Partial<NonNullable<NirMessage["toolResult"]>>) {
+    return nirToConversation(
+      sessionOf([
+        msg({ role: "assistant", toolName: "Bash", toolInput: { command: "pytest" }, toolCallId: "c1" }),
+        msg({
+          role: "tool",
+          content: "some output",
+          toolCallId: "c1",
+          toolResult: verdict
+            ? ({
+                status: "error",
+                method: "source_status",
+                errorText: "1 failed",
+                detail: {},
+                ...verdict,
+              } as NonNullable<NirMessage["toolResult"]>)
+            : undefined,
+        }),
+      ]),
+      "test"
+    );
+  }
+
+  it("carries status, method and errorText onto the paired call", () => {
+    const tc = pair({ status: "error" })[0].toolCalls?.[0];
+    expect(tc).toMatchObject({
+      name: "Bash",
+      output: "some output",
+      status: "error",
+      verdictMethod: "source_status",
+      errorText: "1 failed",
+    });
+  });
+
+  it("leaves status ABSENT when the source reported nothing", () => {
+    // The distinction that matters: "no verdict" is NOT "success". Defaulting this
+    // field would invent a success rate out of thin air. Absence is the honest
+    // representation, so the key is genuinely not there.
+    const tc = pair()[0].toolCalls?.[0];
+    expect(tc?.output).toBe("some output");
+    expect(tc?.status).toBeUndefined();
+    expect("status" in tc!).toBe(false);
+  });
+
+  it("keeps cancelled distinct from error", () => {
+    // A command cut off without reporting failure is not a failed command.
+    const tc = pair({ status: "cancelled", errorText: null })[0].toolCalls?.[0];
+    expect(tc?.status).toBe("cancelled");
+  });
+
+  it("marks derived verdicts so a guess is never read as a report", () => {
+    const tc = pair({ method: "derived" })[0].toolCalls?.[0];
+    expect(tc?.verdictMethod).toBe("derived");
+  });
+
+  it("pairs the verdict to the right call when results arrive out of order", () => {
+    const out = nirToConversation(
+      sessionOf([
+        msg({ role: "assistant", toolName: "A", toolCallId: "call-a" }),
+        msg({ role: "assistant", toolName: "B", toolCallId: "call-b" }),
+        msg({
+          role: "tool",
+          content: "B failed",
+          toolCallId: "call-b",
+          toolResult: {
+            status: "error",
+            method: "source_status",
+            errorText: "boom",
+            detail: {},
+          } as NonNullable<NirMessage["toolResult"]>,
+        }),
+        msg({ role: "tool", content: "A fine", toolCallId: "call-a" }),
+      ]),
+      "test"
+    );
+    expect(out[0].toolCalls?.[0]).toMatchObject({ name: "A", output: "A fine" });
+    expect(out[0].toolCalls?.[0]?.status).toBeUndefined();
+    expect(out[0].toolCalls?.[1]).toMatchObject({ name: "B", status: "error", errorText: "boom" });
+  });
+});

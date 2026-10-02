@@ -1,6 +1,6 @@
 import type { NirMessage, NirSession } from "agent-session-format";
 import type { ConversationMessage, ToolCall } from "./types";
-import { attachToolOutput, pairToolOutputInMessages } from "./tool-pairing";
+import { attachToolOutput, pairToolOutputInMessages, type ToolVerdict } from "./tool-pairing";
 
 /**
  * NIR（agent-session-format 的一事件一消息模型）→ 查看器视图模型。
@@ -51,10 +51,21 @@ export function nirToConversation(session: NirSession, source: string): Conversa
     if (m.role === "tool") {
       const output = m.content;
       const callId = m.toolCallId ?? undefined;
+      // NIR 0.5+ 的结构化结局。此前的实现只取 m.content，把 toolResult 整个丢掉，
+      // 于是「一次失败的调用」和「一次成功的长输出」在 UI 上完全一样——而失败率恰恰是
+      // 看轨迹时最先要看的东西。source 没给结局时 verdict 为 undefined，不补默认值：
+      // 「没报告」不等于「成功」，补一个 success 会凭空造出成功率。
+      const verdict: ToolVerdict | undefined = m.toolResult
+        ? {
+            status: m.toolResult.status,
+            errorText: m.toolResult.errorText ?? undefined,
+            method: m.toolResult.method,
+          }
+        : undefined;
       const group = cur as ConversationMessage | null;
       const paired =
-        (group?.toolCalls ? attachToolOutput(group.toolCalls, output, callId) : false) ||
-        pairToolOutputInMessages(out, output, callId);
+        (group?.toolCalls ? attachToolOutput(group.toolCalls, output, callId, verdict) : false) ||
+        pairToolOutputInMessages(out, output, callId, verdict);
       if (!paired && output) {
         // 配不上的工具结果独立成泡，并封掉当前组合并（防止后面的内容错序合并）。
         cur = null;

@@ -87,6 +87,15 @@ const en = {
   "tool.input": "Input",
   "tool.output": "Output",
   "tool.truncated": "… (truncated)",
+  // Outcome badge. Deliberately NOT shown when the source reported nothing —
+  // "no verdict" and "success" are different facts (see ToolCall.status).
+  "tool.status.success": "success",
+  "tool.status.error": "error",
+  "tool.status.cancelled": "cancelled",
+  "tool.status.unknown": "unknown",
+  "tool.errorText": "Reported error",
+  "tool.statusDerivedHint": "Outcome inferred from output text — the source did not report it",
+  "tool.statusCancelledHint": "Cut off without reporting failure — not an error",
 
   // SwimlaneView
   "swimlane.user": "User",
@@ -181,6 +190,13 @@ const zh: Record<MsgKey, string> = {
   "tool.input": "输入",
   "tool.output": "输出",
   "tool.truncated": "……（已截断）",
+  "tool.status.success": "成功",
+  "tool.status.error": "失败",
+  "tool.status.cancelled": "已中断",
+  "tool.status.unknown": "未知",
+  "tool.errorText": "源报告的错误",
+  "tool.statusDerivedHint": "结局由输出文本推断——source 并未报告",
+  "tool.statusCancelledHint": "被切断且未报告失败——不算错误",
 
   "swimlane.user": "用户",
   "swimlane.main": "主线程",
