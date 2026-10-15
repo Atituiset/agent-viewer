@@ -107,7 +107,7 @@
     ]
   },
   "dependencies": {
-    "@tanstack/react-virtual": "^3.14.10",
+    "@tanstack/react-virtual": "^3.14.15",
     "agent-session-format": "^0.8.0",
     "better-sqlite3": "^13.0.3",
     "electron-updater": "^6.8.9",
