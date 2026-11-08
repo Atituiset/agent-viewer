@@ -38,6 +38,23 @@ describe("kimi parser", () => {
     expect(sessions[0].messageCount).toBe(8);
   });
 
+  it("lists migrated ses_* sessions and arbitrary session dir names", async () => {
+    // Kimi 旧版迁移写出的是 ses_<uuid>；某些版本/工具也可能用别的目录名。
+    // 目录名不应成为发现条件——只要 state.json 可解析就是会话。
+    const SES = "ses_11111111-2222-3333-4444-555555555555";
+    const ARBITRARY = "license.1.2.1";
+    const WD = ".kimi-code/sessions/wd_license-review-skills-v1.2.1_a02ec738789d";
+    const state = (id: string) =>
+      JSON.stringify({ id, cwd: "/p", title: id, archived: false, createdAt: 1, updatedAt: 1 });
+    const src = new FakeFileSource()
+      .add(`${WD}/${SES}/state.json`, state(SES))
+      .add(`${WD}/${SES}/agents/main/wire.jsonl`, WIRE)
+      .add(`${WD}/${ARBITRARY}/state.json`, state(ARBITRARY))
+      .add(`${WD}/${ARBITRARY}/agents/main/wire.jsonl`, WIRE);
+    const sessions = await listKimiSessions(src);
+    expect(sessions.map((s) => s.id).sort()).toEqual([SES, ARBITRARY].sort());
+  });
+
   it("skips archived sessions", async () => {
     const src = new FakeFileSource()
       .add(`${BASE}/state.json`, JSON.stringify({ ...JSON.parse(STATE), archived: true }))

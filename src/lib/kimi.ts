@@ -19,11 +19,15 @@ interface KimiState {
 }
 
 /**
- * Kimi Code 布局：~/.kimi-code/sessions/wd_<项目>_<hash>/session_<uuid>/
+ * Kimi Code 布局：~/.kimi-code/sessions/<workDirKey>/<sessionDir>/
  *   state.json                 —— 元数据（cwd/title/createdAt/archived）
  *   agents/main/wire.jsonl     —— 事件流：user 消息是 context.append_message，
  *                                 assistant 输出是 context.append_loop_event
  *                                 （content.part / tool.call / tool.result）
+ *
+ * workDirKey 通常是 wd_<项目>_<hash>。sessionDir 新版是 session_<uuid>，
+ * 旧版迁移过来的是 ses_<uuid>，不能只认 session_ 前缀——否则整个 workspace
+ * 目录会静默消失。这里统一以「目录里有可解析的 state.json」为准。
  */
 export async function listKimiSessions(source: FileSource): Promise<ToolSession[]> {
   if (!(await source.exists(ROOT))) return [];
@@ -41,7 +45,7 @@ export async function listKimiSessions(source: FileSource): Promise<ToolSession[
         }
         const sessions = await Promise.all(
           sessionDirs
-            .filter((s) => s.isDirectory && s.name.startsWith("session_"))
+            .filter((s) => s.isDirectory)
             .map(async (sess): Promise<ToolSession | null> => {
               const sessRel = join(wdRel, sess.name);
               try {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { resolvePrivateKey } from "./ssh";
+import { resolvePrivateKey, ConcurrencyLimiter } from "./ssh";
 
 function tmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "av-ssh-"));
@@ -37,5 +37,29 @@ describe("resolvePrivateKey", () => {
 
   it("returns undefined when no key is available", () => {
     expect(resolvePrivateKey(undefined, tmpHome())).toBeUndefined();
+  });
+});
+
+describe("ConcurrencyLimiter", () => {
+  it("never runs more than the configured number of jobs", async () => {
+    const limiter = new ConcurrencyLimiter(2);
+    let active = 0;
+    let peak = 0;
+    const jobs = Array.from({ length: 10 }, () =>
+      limiter.run(async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 2));
+        active--;
+      })
+    );
+    await Promise.all(jobs);
+    expect(peak).toBe(2);
+  });
+
+  it("releases the slot when a job throws", async () => {
+    const limiter = new ConcurrencyLimiter(1);
+    await expect(limiter.run(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+    await expect(limiter.run(async () => "ok")).resolves.toBe("ok");
   });
 });

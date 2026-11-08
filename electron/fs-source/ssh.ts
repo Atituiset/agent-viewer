@@ -38,6 +38,43 @@ export function resolvePrivateKey(raw: string | undefined, home = os.homedir()):
 const EXEC_TIMEOUT_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 15_000;
 
+/**
+ * 单条 SSH 连接上同时打开的 exec channel 上限。
+ *
+ * OpenSSH 的 MaxSessions 默认是 10。解析器会按目录并行发起 readDir
+ * （Kimi 一个 home 下十几个 workspace = 十几条 find），并发一高就会撞上
+ * "Channel open failure: open failed"，而 readDir 的 catch 会把整个目录
+ * 当成空目录，表现为「有的目录没被发现」。留足余量，别打满 MaxSessions。
+ */
+export const SSH_EXEC_CONCURRENCY = 4;
+
+/**
+ * 带排队和「槽位直接移交」的并发限制器。不能用简单的
+ * `active--; resolve()`：被唤醒者恢复执行前，新调用可能已经占走名额，
+ * 导致实际并发超过上限。
+ */
+export class ConcurrencyLimiter {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly max: number) {}
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active >= this.max) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    } else {
+      this.active++;
+    }
+    try {
+      return await fn();
+    } finally {
+      const next = this.waiters.shift();
+      if (next) next(); // 槽位直接交给下一个等待者，active 不变
+      else this.active--;
+    }
+  }
+}
+
 /** 区分「命令正常执行但退出码非零」与「连接级失败」：前者不该触发重建连接再重试。 */
 class RemoteCommandError extends Error {}
 
@@ -73,6 +110,7 @@ export class SshFileSource implements FileSource {
   private clientReady = false;
   private disposed = false;
   private initPromise: Promise<void> | null = null;
+  private readonly execLimiter = new ConcurrencyLimiter(SSH_EXEC_CONCURRENCY);
 
   constructor(private opts: SshOptions) {
     this.client = this.buildClient();
@@ -163,9 +201,16 @@ export class SshFileSource implements FileSource {
     return resolvePath(this, p);
   }
 
-  /** 运行一条远程命令，返回 stdout；非 0 退出码或超时则 reject。
-   *  timeoutMs 可选：全 home 扫描这类重命令传更长预算（默认 30s）。 */
+  /**
+   * 运行一条远程命令，返回 stdout；非 0 退出码或超时则 reject。
+   * timeoutMs 可选：全 home 扫描这类重命令传更长预算（默认 30s）。
+   * 所有 exec 都经过并发限制器，避免打满 sshd 的 MaxSessions。
+   */
   private async exec(cmd: string, timeoutMs = EXEC_TIMEOUT_MS): Promise<string> {
+    return this.execLimiter.run(() => this.execUnlocked(cmd, timeoutMs));
+  }
+
+  private async execUnlocked(cmd: string, timeoutMs: number): Promise<string> {
     const attempt = (): Promise<string> =>
       new Promise((res, rej) => {
         let out = "";
