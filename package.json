@@ -60,6 +60,9 @@
     "directories": {
       "output": "release"
     },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
     "asarUnpack": [
       "**/better-sqlite3/**",
       "**/*.node"
