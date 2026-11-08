@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-08
+
+### Fixed
+
+- **Remote directories no longer disappear from SSH machines**: session
+  listing opens one `find` per agent workspace, and a machine with more
+  workspaces than sshd's `MaxSessions` (default 10) got
+  `Channel open failure: open failed`. `readDir` swallowed that as an empty
+  directory, so whole workspaces silently vanished. Exec channels are now
+  capped at 4 with a queue.
+- **Kimi sessions are found regardless of directory naming**: the parser
+  required session directories to start with `session_`, which hid sessions
+  migrated as `ses_<uuid>` and any other custom naming. A directory with a
+  valid `state.json` is now listed.
+- **CI builds no longer depend on GitHub's Electron download**: unit tests
+  mock `electron` instead of triggering the lazy 100MB+ binary download, and
+  electron-builder uses the npmmirror copy of the official Electron binaries.
+
 ## [0.8.2] - 2026-09-22
 
 ### Fixed
